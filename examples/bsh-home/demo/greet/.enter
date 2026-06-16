@@ -1,0 +1,3 @@
+#!/bin/sh
+# Nested namespace: reachable as `demo.greet`.
+echo "greetings from the demo.greet namespace folder"

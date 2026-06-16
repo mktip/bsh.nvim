@@ -1,0 +1,69 @@
+# bsh playground
+
+Press <CR> (Enter) on a cell to run it. Re-run any cell to refresh its result
+in place -- the ```out / ```dir blocks below a cell are owned by bsh. `za` folds
+a result block. This file is a `.bsh`, so cells are live the moment you open it.
+
+
+## one-shot shell
+
+$ echo "hello from a fresh shell"; uname -s
+
+
+## persistent session -- env / cwd carry across cells
+
+$$ export GREETING=hi; cd /tmp
+$$ echo "$GREETING from $(pwd)"
+
+
+## multiline (run <CR> anywhere inside the fence)
+
+```$$
+for i in 1 2 3; do
+  echo "line $i"
+done
+```
+
+
+## python -- one-shot ($) vs session ($$)
+
+```python $
+print("one-shot:", 2 ** 10)
+```
+
+```python $$
+import math
+r = 3
+```
+
+```python $$
+print("area =", round(math.pi * r * r, 2))   # sees r + math from the cell above
+```
+
+
+## listing & navigation  (<CR> on an entry drills in / opens)
+
+: ~
+
+: goto pockt
+
+
+## namespace -- your $BSH_HOME command tree
+## (point BSH_HOME at examples/bsh-home to try these)
+
+llm.tools.weather
+
+llm.tools.reverse
+
+llm.tools
+
+host
+
+demo.hello
+
+demo.greet
+
+
+## agent (needs the `llm` CLI) -- >> folds in the cell above as context
+
+> say hello in one short sentence

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Folder behaviour: Enter on the `host` namespace runs this `.enter` instead of
+# listing the folder. (A dir without a .enter just lists.)
+echo "host:   $(uname -n)"
+echo "os:     $(uname -sr)"
+echo "uptime:$(uptime 2>/dev/null | sed 's/^ */ /')"
