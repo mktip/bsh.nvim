@@ -1,0 +1,12 @@
+# nvim / lua
+*.luac
+.luarc.json
+
+# editor / os
+*.swp
+*.swo
+.DS_Store
+
+# test scratch
+/tmp/
+*.log
