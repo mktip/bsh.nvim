@@ -63,8 +63,8 @@ Requires Neovim 0.9+. Python cells need `python3`; agent cells need
 { "mktip/bsh.nvim", config = true }   -- or just drop the repo on your runtimepath
 ```
 
-`bsh` attaches automatically to `*.bsh` files (and the legacy `*.lab`). Turn any
-buffer into a shell on demand with `:Bsh!`; `:Bsh` opens a fresh scratch one.
+`bsh` attaches automatically to `*.bsh` files. Turn any buffer into a shell on
+demand with `:Bsh!`; `:Bsh` opens a fresh scratch one.
 
 ## Status
 

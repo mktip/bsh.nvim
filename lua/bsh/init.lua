@@ -205,12 +205,11 @@ local function doc_cwd(buf)
   return cwd
 end
 
--- The namespace root ($BSH_HOME, default ~/pockt/bsh; $LLMLAB_HOME still honoured
--- as a legacy fallback). Returns "" when it doesn't exist, so namespace cells
--- simply don't fire if it isn't set up (prose stays prose). The directory tree
--- under it IS the namespace, 1:1, no registry.
+-- The namespace root ($BSH_HOME, default ~/pockt/bsh). Returns "" when it
+-- doesn't exist, so namespace cells simply don't fire if it isn't set up (prose
+-- stays prose). The directory tree under it IS the namespace, 1:1, no registry.
 local function ns_home()
-  local h = vim.env.BSH_HOME or vim.env.LLMLAB_HOME
+  local h = vim.env.BSH_HOME
   if not h or h == "" then h = "~/pockt/bsh" end
   h = vim.fn.expand(h)
   return vim.fn.isdirectory(h) == 1 and h or ""
@@ -708,23 +707,35 @@ end
 
 -- A `namespace` cell is a bare dotted identifier on its own line that resolves
 -- to a path under $BSH_HOME (dots -> slashes): `llm.tools.weather`. Enter
--- dispatches on what's there -- a directory is listed (navigate), a directory
--- with an executable `.enter` runs that, a file is executed by its shebang into
--- an `out` fence (so a dual-purpose `weather.py` runs its `__main__`). The leaf
--- file may carry any extension (the dotted name `...weather` matches `weather`
--- or `weather.<ext>`), since execution is shebang- not extension-driven.
+-- dispatches on what's there:
+--   * a file is executed by its shebang into an `out` fence (so a dual-purpose
+--     `weather.py` runs its `__main__`); the leaf may carry any extension
+--     (`...weather` matches `weather` or `weather.<ext>`) since dispatch is
+--     shebang- not extension-driven;
+--   * a directory with an executable `.enter` runs that;
+--   * a directory without one is LISTED -- and the trigger is canonicalised to a
+--     TRAILING DOT (`demo` -> `demo.`) so its entries navigate as `demo.<child>`.
+-- A trailing dot is also an explicit "peek inside" operator: `demo.greet.` lists
+-- the dir even when `demo.greet` (no dot) would have run its `.enter`.
 -- Returns true if it resolved+handled, false (prose) otherwise.
 local function run_namespace(buf, trow, indent, dotted)
   local home = ns_home()
   if home == "" then return false end
-  local base = home .. "/" .. (dotted:gsub("%.", "/"))
+  local force_list = dotted:sub(-1) == "."          -- trailing dot = list, not .enter
+  local clean = (dotted:gsub("%.+$", ""))           -- strip trailing dot(s)
+  if clean == "" then return false end
+  local base = home .. "/" .. (clean:gsub("%.", "/"))
 
   if vim.fn.isdirectory(base) == 1 then
     local enter = base .. "/.enter"
-    if vim.fn.executable(enter) == 1 then
+    if not force_list and vim.fn.executable(enter) == 1 then
       run_oneshot(buf, trow, indent, { enter })
     else
-      run_list(buf, trow, indent, "", base) -- plain navigable listing
+      -- canonicalise the trigger to `clean.` so the listing's entries resolve as
+      -- `clean.<child>` (and re-running this cell is idempotent). List with -H so
+      -- the `.enter` (and any other dotfiles in the namespace) are visible.
+      vim.api.nvim_buf_set_lines(buf, trow, trow + 1, false, { indent .. clean .. "." })
+      run_list(buf, trow, indent, "", base .. " -H") -- navigable listing, hidden shown
     end
     return true
   end
@@ -826,26 +837,26 @@ local function execute_cell()
       -- entries the same way `:` does, but staying DOTTED: drilling into a subdir
       -- rewrites the trigger to the deeper namespace, files open for editing.
       local nsdot = trig:match("^%s*([%w_][%w_%.%-]*)%s*$")
-      local home = nsdot and ns_home() or ""
-      local base = home ~= "" and (home .. "/" .. (nsdot:gsub("%.", "/"))) or ""
+      -- a namespace listing's trigger carries a trailing dot (`demo.`); strip it
+      -- so we never build `demo..child`
+      local clean = nsdot and (nsdot:gsub("%.+$", "")) or nil
+      local home = clean and ns_home() or ""
+      local base = home ~= "" and (home .. "/" .. (clean:gsub("%.", "/"))) or ""
       if base == "" or vim.fn.isdirectory(base) ~= 1 or tag ~= "dir" then return false end
       local entry = (line:gsub("^%s+", "")):gsub("%s+$", "")
       if entry == "" then return false end
       local tindent = trig:match("^(%s*)")
       if entry == "../" then -- walk up one namespace segment (drop to `:` at root)
-        local parent = nsdot:match("^(.+)%.[^.]+$")
+        local parent = clean:match("^(.+)%.[^.]+$")
         if parent then
-          vim.api.nvim_buf_set_lines(buf, open - 1, open, false, { tindent .. parent })
-          run_namespace(buf, open - 1, tindent, parent)
+          run_namespace(buf, open - 1, tindent, parent .. ".") -- list the parent
         else
           local up = vim.fn.fnamemodify(base, ":h")
           vim.api.nvim_buf_set_lines(buf, open - 1, open, false, { tindent .. ": " .. up })
           run_list(buf, open - 1, tindent, "", up)
         end
-      elseif entry:sub(-1) == "/" then -- drill deeper, staying in the namespace
-        local child = nsdot .. "." .. entry:sub(1, -2)
-        vim.api.nvim_buf_set_lines(buf, open - 1, open, false, { tindent .. child })
-        run_namespace(buf, open - 1, tindent, child)
+      elseif entry:sub(-1) == "/" then -- drill deeper: descend + list (append `.`)
+        run_namespace(buf, open - 1, tindent, clean .. "." .. entry:sub(1, -2) .. ".")
       else
         open_entry("", base .. "/" .. entry)
       end
@@ -948,16 +959,14 @@ function M.attach(buf)
 end
 
 M.config = function()
-  -- `*.bsh` is the dedicated filetype (`*.lab` kept as a legacy alias). The
-  -- `*.bsh.md` / `*.lab.md` (and .markdown) forms stay markdown -- so they keep
-  -- markdown highlighting -- but get buffer-shell powers via M.attach below.
+  -- `*.bsh` is the dedicated filetype; `*.bsh.md` / `*.bsh.markdown` stay
+  -- markdown -- so they keep markdown highlighting -- but get buffer-shell
+  -- powers via M.attach below.
   vim.filetype.add({
-    extension = { bsh = "bsh", lab = "bsh" },
+    extension = { bsh = "bsh" },
     pattern = {
       ["%.bsh%.md$"] = "markdown",
       ["%.bsh%.markdown$"] = "markdown",
-      ["%.lab%.md$"] = "markdown",
-      ["%.lab%.markdown$"] = "markdown",
     },
   })
 
@@ -966,11 +975,10 @@ M.config = function()
     pattern = "bsh",
     callback = function(args) M.attach(args.buf) end,
   })
-  -- ...and on the `*.bsh.md` / `*.lab.md` markdown convention (filename, not
-  -- filetype, since the compound-filetype FileType event we can't rely on never
-  -- enters into it).
+  -- ...and on the `*.bsh.md` markdown convention (filename, not filetype, since
+  -- the compound-filetype FileType event we can't rely on never enters into it).
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile" }, {
-    pattern = { "*.bsh.md", "*.bsh.markdown", "*.lab.md", "*.lab.markdown" },
+    pattern = { "*.bsh.md", "*.bsh.markdown" },
     callback = function(args) M.attach(args.buf) end,
   })
 
