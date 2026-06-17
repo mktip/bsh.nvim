@@ -263,14 +263,62 @@ Pick targets that show the namespace+listing model off, à la Xiki:
   changes), `git.wip`, `git.sync`. Great with the `bsh`-in-a-session cwd story.
 - Others that fit: `http.get <url>`, `json.*`, `notes.*`, `docker.*`.
 
+## Output to a side buffer (`%` long-runner / logs)
+
+Some output shouldn't live inline under the cell: long build logs, `tail -f`,
+anything you want to scroll/search separately. The cell should leave a compact
+**reference**, and the bytes should live in a **separate buffer** — which is the
+`%` long-runner finally made concrete.
+
+Hard constraint the user named: the output buffer **does not necessarily exist on
+disk, and it's not always wise to persist it preemptively** (huge, infinite,
+sensitive, `/dev/random`). So the reference is a *handle that can become a path*,
+never a path by default.
+
+Model:
+
+- **`%` routes output to a side buffer** (`$` stays inline). The cell leaves an
+  owned **reference fence**, not content:
+
+  ```
+  % ./build.sh
+  ```log
+  bsh://out/build.sh · 4213 lines · exit 0 · <CR> open · :w persist
+  ```
+  ```
+
+  The body is a one-line, live-updating status (line count, running/exit).
+- **The side buffer is ephemeral + bounded:** a scratch `nofile` buffer named
+  `bsh://out/<doc>/<n>` (not on disk), kept as a **ring** (capped lines) so
+  infinite streams can't OOM, with follow/autoscroll. `<CR>` on the reference
+  opens it in a split.
+- **Link = handle, not path:** rides the extmark we already anchor output with
+  (extmark id → bufnr map). Session-lived; reopen in a fresh nvim and it's gone —
+  acceptable for logs. (A short id token in the fence text can survive to show a
+  "(closed)" state.)
+- **Persist on demand only:** `:w` in the side buffer (or a keymap on the
+  reference) writes it to `$XDG_CACHE_HOME/bsh/…` and rewrites the fence to a real
+  `bsh:file:<path>` reference that survives reopen. Disk is opt-in — exactly the
+  "don't save preemptively" requirement.
+- **Idempotent re-run:** re-running the `%` cell clears the ring and reuses its
+  buffer.
+- **Lifecycle:** killing the doc or the cell stops the job (we already track
+  inflight jobs + BufWipeout → stop_session); wiping the side buffer stops it too.
+
+Optional later — **auto-spill threshold:** a plain `$` whose output exceeds N
+lines auto-collapses to the same reference fence with a "(N more lines) → open"
+affordance, so you needn't pre-choose `%` vs `$`. Ties into the same machinery.
+
+(Relates to the parked ring-buffer/follow-log idea below — this *is* that, with
+the link pointing at a buffer rather than only a log.)
+
 ## Other roadmap bits (parked)
 
 - **Prompt loop** for the shell-first feel: run → drop a fresh `$$ ` prompt below
   in insert mode; plus Ctrl-C interrupt (we already track the job) and a
   pwd-aware prompt.
-- **`%` long-runner** → stream into a bounded (ring) log buffer and leave a
-  follow-link in the `out` fence. nvim has bounded scrollback via `:terminal`'s
-  `'scrollback'`; a normal buffer is trivially ring-able.
+- **`%` long-runner** → now specced above ("Output to a side buffer"): bounded
+  ring buffer + reference fence + persist-on-`:w`.
 - **Interactive tree**: replace the `tree -F` text dump with a lazy,
   inline-expandable tree (folders expand/collapse in place, children listed on
   demand) — structure lives in indentation, no `tree` dependency, no upfront
