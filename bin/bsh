@@ -1,0 +1,59 @@
+#!/bin/sh
+# bsh — run a $BSH_HOME namespace command from ANY shell, in the CALLER's $PWD.
+#
+# The CLI half of the plugin's namespace. It mirrors the same dotted-name
+# resolution the editor uses — dots -> slashes, dispatch by shebang (the
+# extension is cosmetic), a directory runs its `.enter` — but as a portable
+# script, so `bsh git.undo` works in a `$`/`$$` cell, a real terminal, or over
+# ssh: anywhere `bsh` and `$BSH_HOME` are present.
+#
+# It does NOT cd — the leaf runs in the current directory, which is the whole
+# point. Repo-relative commands "just work" from a session that cd'd there:
+#
+#     $$ cd ~/myrepo
+#     $$ bsh git.undo            # runs git.undo IN ~/myrepo, not the doc's dir
+#
+# Args after the name are forwarded verbatim ("$@"), and since the calling shell
+# already handled pipes/redirection/globs, bsh stays a pure resolve-and-exec.
+set -eu
+
+prog=${0##*/}
+
+die() { printf '%s: %s\n' "$prog" "$1" >&2; exit "${2:-1}"; }
+
+if [ $# -lt 1 ]; then
+  printf 'usage: %s <name.space> [args...]\n' "$prog" >&2
+  printf '       resolves <name.space> under $BSH_HOME and runs it in $PWD\n' >&2
+  exit 2
+fi
+
+name=$1
+shift
+
+home=${BSH_HOME:-$HOME/pockt/bsh}
+[ -d "$home" ] || die "\$BSH_HOME ($home) is not a directory"
+
+# dotted name -> relative path. Strip any trailing dots first (a plugin-only
+# "peek/list" affordance — meaningless to the CLI), then dots -> slashes.
+rel=$(printf '%s' "$name" | sed -e 's/\.\{1,\}$//' -e 's#\.#/#g')
+[ -n "$rel" ] || die "empty command name"
+base=$home/$rel
+
+# A directory: run its `.enter` (its behaviour definition), else there's nothing
+# to execute (the editor would LIST it, but a CLI has no fence to list into).
+if [ -d "$base" ]; then
+  if [ -x "$base/.enter" ]; then
+    exec "$base/.enter" "$@"
+  fi
+  die "$name is a directory (no executable .enter to run)"
+fi
+
+# A leaf: the exact name, else a single-extension sibling (weather -> weather.py),
+# dispatched by its shebang. First readable candidate wins.
+for cand in "$base" "$base".*; do
+  [ -f "$cand" ] || continue
+  [ -x "$cand" ] || die "$cand is not executable (chmod +x it)" 126
+  exec "$cand" "$@"
+done
+
+die "no command '$name' under $home" 127

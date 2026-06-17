@@ -242,10 +242,17 @@ parent dirs created, exec bit set, so it's runnable immediately — `demo.newcmd
 then `demo.newcmd world` works in one loop. Confirm is `M.confirm` (overridable).
 One operator covers both "make new command" and "jump to a command's source".
 
-### 3. The `bsh` PATH dispatcher (the keystone for args + cwd)
+### 3. The `bsh` PATH dispatcher (the keystone for args + cwd) — BUILT (2026-06-18)
 
-A tiny launcher binary `bsh` on `$PATH` that resolves a dotted name under
-`$BSH_HOME` and `exec`s the leaf **in the caller's `$PWD`**, forwarding args:
+`bin/bsh`, a portable POSIX-sh launcher on `$PATH`, resolves a dotted name under
+`$BSH_HOME` and `exec`s the leaf **in the caller's `$PWD`**, forwarding args. It
+mirrors the editor's resolution exactly — strip trailing dots, dots → slashes,
+exact name then a single-extension sibling, shebang dispatch, a directory's
+`.enter` — but a directory with no `.enter` is an error (a CLI has no fence to
+list into). It never `cd`s; that's the point. Errors mirror a shell: 127
+not-found, 126 not-executable, 2 usage. Tested in `tests/test_bsh.lua` (resolve +
+run, arg forwarding, **runs in the caller's cwd** via a temp `$BSH_HOME`, `.enter`,
+127). Usage:
 
 ```sh
 cd ~/myrepo

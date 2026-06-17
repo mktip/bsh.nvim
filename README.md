@@ -70,6 +70,27 @@ thing `<CR>` runs *and* a tool registered for the `llm` CLI. See
 export BSH_HOME="$HOME/pockt/bsh"
 ```
 
+#### `bsh` — the same namespace from any shell
+
+`bin/bsh` is the CLI half: it resolves a dotted name the same way (`bsh git.undo`
+→ `$BSH_HOME/git/undo`, shebang-dispatched) and execs it **in the current
+directory** — so a namespace command runs in *your* `$PWD`, not the document's.
+Put it on `PATH` and it works in a `$`/`$$` cell, a real terminal, or over ssh:
+
+```sh
+export PATH="$PATH:/path/to/bsh.nvim/bin"
+```
+
+That's the answer to repo-relative commands: route through a session that's there.
+
+```
+$$ cd ~/myrepo
+$$ bsh git.undo        # runs git.undo IN ~/myrepo (bsh never cd's)
+```
+
+(Inside the editor a bare `foo.bar` cell already resolves in-process; `bsh` is for
+*shells* — sessions, terminals, remotes — where there's no plugin to ask.)
+
 ### Targets are routes (ssh, containers, jails, VMs — composable)
 
 The bit before `$`/`:` is a **route**: `scheme@addr` hops chained with `/`, read
