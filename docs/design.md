@@ -393,12 +393,37 @@ Tests: `tests/test_session.lua` — env carries across cells; the badge tracks
 transport that runs a shell locally, so the route path is exercised end-to-end
 without a network).
 
-**Not yet (next slice):** a `docker.list` namespace command that drills a
-container id into a `docker@id$$` session cell (ties the route grammar to the menu
-model). VM **consoles** (PTY) stay with the parked interactivity work; the
-ssh-style `vm` template covers the exec case now. The `:`/`$$` cwd story is now
-closed for sessions — the badge is the prompt the earlier sketch wanted, without
-rewriting the user's line.
+**The badge is a *last-ran-here* marker, not a live prompt (known, kept).** A `$$`
+session has exactly ONE cwd at any instant (it's one shell), but the badge is
+written *per cell, at completion* — "where the shell was when THIS command ran."
+So if an earlier cell `cd /tmp`, the shell is now in `/tmp` and every later cell
+shares that, yet a cell that last ran in `/srv` still shows `/srv` until it's
+re-run. The badges don't stay in sync because the shell moves out from under the
+cells that aren't running.
+
+This is a genuine fork, and we're deliberately on the *history* side of it:
+
+- **As a log annotation** ("this command executed in `/tmp`") the per-cell
+  snapshot is correct and arguably what you want — history shouldn't silently
+  rewrite itself, and a cell *above* a later `cd` truthfully ran *before* it.
+- **As a prompt** ("press Enter here → you're in `/tmp`") it's wrong for every
+  cell except the last one that ran, since a real prompt shows *current* state and
+  every cell is a place you might hit Enter next.
+
+We lean log, so calling it a *prompt* oversells it — read it as "where this last
+ran." Making it truly live would mean the session tracks ALL its cells' prompt
+rows (a set of extmarks per `(buf, lang, target)`) and re-broadcasts the new cwd
+to every one on each completion — more bookkeeping, and it forces the cells-above
+weirdness above. **Future:** this is really a question of *what `$$` shares*. Today
+it shares everything incl. cwd (one shell). One could imagine a variant that
+shares env/vars but NOT cwd (each cell its own directory — badges trivially
+coherent because each is independent), or the present whole-shell variant with
+live-broadcast badges. Pick later; for now the snapshot is honest if named right.
+
+**Next slice:** a `docker.list` namespace command that drills a container id into a
+`docker@id$$` session cell (ties the route grammar to the menu model). VM
+**consoles** (PTY) stay with the parked interactivity work; the ssh-style `vm`
+template covers the exec case now.
 
 ## Output to a side buffer (a gesture, not a marker) — BUILT (2026-06-17)
 

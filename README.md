@@ -86,8 +86,11 @@ web@prod $ uname -a            # plain ssh (unchanged)
 
 `$$` sessions ride the *same* route, so a persistent shell works over any
 transport, not just ssh. Each `$$` cell shows a small **cwd badge** at end of line
-(`web@prod:/srv`) — read from the shell's own `$PWD`, so it stays right through
-`cd`, dynamic paths, and subshells.
+(`web@prod:/srv`) read from the shell's own `$PWD` — so it's right through `cd`,
+dynamic paths, and subshells, where parsing the command never could be. Note it's
+a *last-ran-here* marker, not a live prompt: it records where **that** cell ran,
+so cells sharing one session can show different dirs until each is re-run (they
+all share the shell's one current cwd — see `docs/design.md`).
 
 The engine hardcodes only **ssh**; every other transport is a one-line entry in
 `require('bsh').transports` — an argv template with `{addr}` and `{cmd}` holes (or
