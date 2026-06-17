@@ -1,4 +1,4 @@
--- `$$` persistent shell sessions: state carries across cells, the cwd badge
+-- `%%` persistent shell sessions: state carries across cells, the cwd badge
 -- rides the shell's own $PWD, and a session composes over the route engine (so
 -- any user-defined transport gets persistent sessions, not just ssh).
 local H = require("tests.helpers")
@@ -22,24 +22,24 @@ local function badge(r0)
   )
 end
 
-T["$$ is one shell: env carries across cells"] = function()
-  H.bootstrap(child, { name = "s.bsh", lines = { "$$ X=hi", "", "$$ echo $X" } })
-  H.run(child, H.rowof(child, "^%$%$ X=hi$"))
+T["%% is one shell: env carries across cells"] = function()
+  H.bootstrap(child, { name = "s.bsh", lines = { "%% X=hi", "", "%% echo $X" } })
+  H.run(child, H.rowof(child, "^%%%% X=hi$"))
   H.run(child, H.rowof(child, "echo %$X")) -- re-locate: the first run shifted it down
   eq(H.rowof(child, "^hi$") ~= nil, true)
 end
 
 T["the cwd badge tracks the shell's $PWD (no `cd` parsing)"] = function()
-  H.bootstrap(child, { name = "c.bsh", lines = { "$$ cd /tmp", "", "$$ pwd" } })
+  H.bootstrap(child, { name = "c.bsh", lines = { "%% cd /tmp", "", "%% pwd" } })
   H.run(child, H.rowof(child, "cd /tmp"))
-  H.run(child, H.rowof(child, "^%$%$ pwd$"))
+  H.run(child, H.rowof(child, "^%%%% pwd$"))
   -- `pwd` confirms the session really moved; the badge mirrors it on the cell line
   eq(H.rowof(child, "^/tmp$") ~= nil, true)
   eq(badge(0):find("/tmp", 1, true) ~= nil, true) -- badge on the `cd /tmp` cell (row 0)
 end
 
 T["a session composes over a user-defined transport"] = function()
-  H.bootstrap(child, { name = "t.bsh", lines = { "loc@x$$ Y=ok", "", "loc@x$$ echo $Y" } })
+  H.bootstrap(child, { name = "t.bsh", lines = { "loc@x%% Y=ok", "", "loc@x%% echo $Y" } })
   -- `loc` is a transport that just runs a shell locally -> exercises build_argv's
   -- route path end-to-end (the same path docker/jail/ssh take) without a network.
   child.lua("require('bsh').transports.loc = { 'sh', '-lc', '{cmd}' }")

@@ -41,7 +41,7 @@ db="$datadir/$file.ndb"
 # the rest of the breadcrumb (the filter terms) is irrelevant -- we know the addr.
 for a in "$@"; do
   case "$a" in
-    "connect: "*) printf '%s$$ \n' "${a#connect: }"; exit 151 ;;
+    "connect: "*) m="${BSH_MARKER:-%}"; printf '%s%s%s \n' "${a#connect: }" "$m" "$m"; exit 151 ;;
   esac
 done
 

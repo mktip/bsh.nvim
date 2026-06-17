@@ -18,7 +18,7 @@ case $# in
     # the drilled menu line arrives as one quoted arg ("<id>  <image>  <name>");
     # take its first field as the container id and hand back a session cell for it.
     id=${1%% *}
-    printf 'docker@%s$$ \n' "$id"
+    m="${BSH_MARKER:-%}"; printf 'docker@%s%s%s \n' "$id" "$m" "$m"
     exit 151
     ;;
 esac

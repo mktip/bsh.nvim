@@ -26,7 +26,7 @@ T["a resolved entry offers a connect action that emits a session cell"] = functi
   -- drill the connect line: exit 151 emits a `<user>@<dom>$$ ` session cell that
   -- REPLACES the trigger (the db→route→session payoff).
   H.run(child, H.rowof(child, "^connect: "))
-  eq(H.lines(child), { "mktips@simurgh-base$$ " })
+  eq(H.lines(child), { "mktips@simurgh-base%% " })
 end
 
 T["drill a file -> entries; drill an entry -> its fields"] = function()

@@ -79,7 +79,7 @@ T["exit-151 emits a cell: drilling replaces the trigger + fence"] = function()
   -- drill `open`: the command exits config.cell_exit (151) printing a cell line,
   -- so the breadcrumb trigger AND its fence are REPLACED by that ready cell.
   H.run(child, H.rowof(child, "^open$"))
-  eq(H.lines(child), { "fake@one$$ " })
+  eq(H.lines(child), { "fake@one%% " })
 end
 
 T["a non-menu (exit 0) command's `out` lines are inert on <CR>"] = function()

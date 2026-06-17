@@ -7,5 +7,5 @@
 case $# in
   0) echo one; echo two; exit 150 ;;
   1) echo open; echo close; exit 150 ;;
-  *) printf 'fake@%s$$ \n' "$1"; exit 151 ;;
+  *) m="${BSH_MARKER:-%}"; printf 'fake@%s%s%s \n' "$1" "$m" "$m"; exit 151 ;;
 esac

@@ -4,24 +4,30 @@ local util = require("bsh.util")
 local eq = MiniTest.expect.equality
 local T = MiniTest.new_set()
 
+-- the marker is a parameter (config.marker), so the same logic works for any
+-- symbol; default is `%`, and we prove `$` still works to lock in configurability.
 T["parse_runmarker"] = MiniTest.new_set()
-T["parse_runmarker"]["bare $ / $$ are shell"] = function()
-  eq({ util.parse_runmarker("$") }, { "sh", "", false })
-  eq({ util.parse_runmarker("$$") }, { "sh", "", true })
+T["parse_runmarker"]["bare % / %% are shell"] = function()
+  eq({ util.parse_runmarker("%", "%") }, { "sh", "", false })
+  eq({ util.parse_runmarker("%%", "%") }, { "sh", "", true })
 end
 T["parse_runmarker"]["a remote target is captured"] = function()
-  eq({ util.parse_runmarker("user@host$") }, { "sh", "user@host", false })
-  eq({ util.parse_runmarker("user@host$$") }, { "sh", "user@host", true })
+  eq({ util.parse_runmarker("user@host%", "%") }, { "sh", "user@host", false })
+  eq({ util.parse_runmarker("user@host%%", "%") }, { "sh", "user@host", true })
 end
 T["parse_runmarker"]["language-prefixed forms"] = function()
-  eq({ util.parse_runmarker("python $") }, { "python", "", false })
-  eq({ util.parse_runmarker("py $$") }, { "python", "", true })
-  eq({ util.parse_runmarker("bash $") }, { "sh", "", false })
+  eq({ util.parse_runmarker("python %", "%") }, { "python", "", false })
+  eq({ util.parse_runmarker("py %%", "%") }, { "python", "", true })
+  eq({ util.parse_runmarker("bash %", "%") }, { "sh", "", false })
 end
 T["parse_runmarker"]["no marker / unknown lang -> inert (nil)"] = function()
-  eq({ util.parse_runmarker("out") }, {})
-  eq({ util.parse_runmarker("python") }, {})
-  eq({ util.parse_runmarker("ruby $") }, {}) -- ruby not yet a known engine
+  eq({ util.parse_runmarker("out", "%") }, {})
+  eq({ util.parse_runmarker("python", "%") }, {})
+  eq({ util.parse_runmarker("ruby %", "%") }, {}) -- ruby not yet a known engine
+end
+T["parse_runmarker"]["the marker is configurable (e.g. back to $)"] = function()
+  eq({ util.parse_runmarker("user@host$$", "$") }, { "sh", "user@host", true })
+  eq({ util.parse_runmarker("user@host%%", "$") }, {}) -- % isn't the marker here
 end
 
 T["parse_list_args"] = MiniTest.new_set()

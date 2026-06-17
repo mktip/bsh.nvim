@@ -3,7 +3,18 @@
 -- `require('bsh').python = 'python3.12'` and reads keep working.
 local M = {}
 
--- Remote (`user@host$ cmd`) cells run in a login shell so the remote profile
+-- The RUN MARKER: the symbol that turns a line into a shell cell. A single
+-- trailing one (`<marker> cmd`) runs once; doubled (`<marker><marker> cmd`) runs
+-- in a persistent session. It is a SUFFIX after the route (`user@host<marker>`)
+-- so the language/route stays first. Everything in the engine reads this -- the
+-- trigger parser, the fence info-string parser, the cell-emitting commands -- so
+-- changing the shell's symbol is one edit here. `$` collides with Typst math, so
+-- the default is `%` (free in Typst, csh/zsh prompt heritage). Set it back to
+-- `"$"` for the classic look. Child processes see it as $BSH_MARKER (so a
+-- cell-emitting namespace command prints the right symbol).
+M.marker = "%"
+
+-- Remote (`user@host% cmd`) cells run in a login shell so the remote profile
 -- and bashrc load (PATH, pkg, env). Set false for a bare, faster `ssh host cmd`
 -- when the remote already has the env you need or you want zero startup files.
 M.remote_login = true

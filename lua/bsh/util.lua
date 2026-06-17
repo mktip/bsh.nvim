@@ -69,24 +69,29 @@ function M.tree_entry(line)
 end
 
 -- A fence info-string's run marker -> (lang, target, session). Drives which
--- engine a ` ```lang $ ` / ` ```$$ ` input fence uses; nil lang = inert.
+-- engine a ` ```lang % ` / ` ```%% ` input fence uses; nil lang = inert. `marker`
+-- is the configured shell symbol (config.marker) -- passed in so this stays a
+-- pure function; the patterns are built from its pattern-escaped form. Session =
+-- the optional SECOND marker is present.
 local LANG_ALIAS = { sh = "sh", bash = "sh", shell = "sh", py = "python", python = "python" }
-function M.parse_runmarker(info)
+function M.parse_runmarker(info, marker)
+  local m = vim.pesc(marker)
+  local pat = "^(%S-)" .. m .. "(" .. m .. "?)$"
   local word, rest = info:match("^(%a[%w_]*)%s+(.+)$")
   if word then -- language-prefixed form
     local lang = LANG_ALIAS[word]
     if not lang then
       return nil
     end
-    local tgt, dbl = rest:match("^(%S-)%$(%$?)$")
+    local tgt, dbl = rest:match(pat)
     if tgt then
-      return lang, tgt, dbl == "$"
+      return lang, tgt, dbl ~= ""
     end
     return nil
   end
-  local tgt, dbl = info:match("^(%S-)%$(%$?)$") -- bare bash form
+  local tgt, dbl = info:match(pat) -- bare bash form
   if tgt then
-    return "sh", tgt, dbl == "$"
+    return "sh", tgt, dbl ~= ""
   end
   return nil
 end

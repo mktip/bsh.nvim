@@ -77,7 +77,7 @@ local function input_fence_at(buf, row)
     if l:match("^%s*```%S") then openr = r; break end
   end
   if not openr then return nil end
-  local lang, target, session = parse_runmarker(vim.trim(gl(openr):match("^%s*```(.*)$") or ""))
+  local lang, target, session = parse_runmarker(vim.trim(gl(openr):match("^%s*```(.*)$") or ""), config.marker)
   if not lang then return nil end -- e.g. ```out / ```python (no marker) -> inert
   local closer
   for r = openr + 1, total - 1 do
@@ -167,30 +167,16 @@ local function execute_cell(to_buf)
     end
   end
 
-  -- `.bsh.typ` (typst mode): the run marker is `%`/`%%` instead of `$`/`$$` (so
-  -- `$` stays Typst math), and the owned result is a `#cell(...)` ELEMENT, not an
-  -- ```out fence -- run_shell stages it when vim.b.bsh_typst is set. v1 wires the
-  -- one-shot `%` (and routed `host% cmd`); `%%` sessions are not wired yet.
-  if vim.b[buf].bsh_typst then
-    local ptgt, pdbl, pcmd = line:match("^%s*(%S-)(%%%%?)%s+(.+)$")
-    if pcmd then
-      if pdbl == "%%" then
-        vim.notify("bsh: %% sessions in .bsh.typ aren't wired yet (use % one-shot)",
-          vim.log.levels.WARN)
-      else
-        run_shell(buf, trow, indent, ptgt, pcmd, to_buf)
-      end
-      return true
-    end
-  end
-
-  -- inline shell: `[user@host]$ cmd` (one-shot) or `[user@host]$$ cmd` (shared
-  -- session, local or remote). One unified match: the marker is `$`/`$$` and the
-  -- greedy `%$?` captures the doubled form, so `user@host$$ cmd` parses
-  -- target=`user@host` (NOT `user@host$`, which would corrupt the ssh host).
-  local stgt, sdbl, scmd = line:match("^%s*(%S-)(%$%$?)%s+(.+)$")
+  -- inline shell: `[user@host]<marker> cmd` (one-shot) or `…<marker><marker> cmd`
+  -- (shared session, local or remote). The marker is config.marker (default `%`);
+  -- one unified match captures the optional doubled form, so `user@host%% cmd`
+  -- parses target=`user@host` (NOT `user@host%`, which would corrupt the ssh
+  -- host). In a `.bsh.typ` buffer run_shell stages a `#cell` element; elsewhere an
+  -- ```out fence -- same parse either way (the marker is global, not per-mode).
+  local m = vim.pesc(config.marker)
+  local stgt, sdbl, scmd = line:match("^%s*(%S-)(" .. m .. m .. "?)%s+(.+)$")
   if scmd then
-    if sdbl == "$$" then
+    if sdbl == config.marker .. config.marker then
       run_session(buf, "sh", stgt, trow, indent, scmd, to_buf, trow)
     else
       run_shell(buf, trow, indent, stgt, scmd, to_buf)
@@ -349,6 +335,11 @@ function M.attach(buf)
 end
 
 M.config = function()
+  -- expose the run marker to child processes: a cell-emitting namespace command
+  -- (exit 151) prints e.g. `<addr>%% ` and reads $BSH_MARKER for the symbol, so it
+  -- stays in sync with config.marker instead of hardcoding `$`/`%`.
+  vim.env.BSH_MARKER = config.marker
+
   -- `*.bsh` is the dedicated filetype; `*.bsh.md` / `*.bsh.markdown` stay
   -- markdown -- so they keep markdown highlighting -- but get buffer-shell
   -- powers via M.attach below.

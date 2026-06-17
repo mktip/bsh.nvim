@@ -29,7 +29,8 @@ end
 local function cell_above(buf, from)
   local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
   local function looks_trigger(s)
-    return s:match("^%S-%$%s") or s:match("^%S-:%s") or s:match("^https?://") or s:match("^>+%s")
+    return s:match("^%S-" .. vim.pesc(config.marker) .. "%s") or s:match("^%S-:%s")
+      or s:match("^https?://") or s:match("^>+%s")
   end
   local r = from
   while r >= 0 and gl(r):match("^%s*$") do r = r - 1 end

@@ -15,5 +15,5 @@ img=${IMG:-alpine}
 name=${1:-bsh-$(date +%s)}
 
 docker run -d --name "$name" "$img" sleep infinity >/dev/null
-printf 'docker@%s$$ \n' "$name"
+m="${BSH_MARKER:-%}"; printf 'docker@%s%s%s \n' "$name" "$m" "$m"
 exit 151
