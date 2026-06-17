@@ -1,0 +1,235 @@
+-- The execution substrate: build a command's argv, run it async, stream its
+-- output (inline into the cell's fence, or into a side buffer), and the small
+-- runners `run_shell` / `run_oneshot` on top. Sits on bsh.fence (extmark/fence
+-- state) and bsh.config (options).
+local M = {}
+
+local fence = require("bsh.fence")
+local config = require("bsh.config")
+local ns, inflight = fence.ns, fence.inflight
+local stage_fence = fence.stage_fence
+
+-- Build the argv to run a command string on `target`. Local (target == "")
+-- goes through the user's shell so pipes/globs/redirs work. Remote runs over ssh
+-- in a *login* shell (so the remote profile/bashrc -- and thus PATH, pkg, env --
+-- load; a bare `ssh host cmd` sources none of that).
+--   -T: no pseudo-tty (we capture non-interactively); stdin is closed by the
+--   caller, so auth must be non-interactive (ssh-agent/keys).
+--   ssh re-joins its trailing args with spaces and the REMOTE shell re-parses
+--   the result, so `cmd` must be shell-quoted or it would word-split remotely.
+local function build_argv(target, cmd)
+  if target == "" then
+    return { vim.o.shell, vim.o.shellcmdflag, cmd }
+  elseif config.remote_login then
+    return { "ssh", "-T", target, "exec ${SHELL:-/bin/sh} -lc " .. vim.fn.shellescape(cmd) }
+  else
+    return { "ssh", "-T", target, cmd }
+  end
+end
+
+-- Run `argv` async, streaming stdout into the fence body LIVE (re-rendering the
+-- body as each chunk arrives, so long-running commands update as they go rather
+-- than dumping everything at exit). stderr is held and folded in at the end via
+-- `transform(out_lines, err_lines, code) -> lines` (the authoritative final
+-- render). `line_xform`, if given, post-processes each line of the live preview
+-- (e.g. neutralising ``` in agent output). stdin is closed so commands see EOF.
+-- `sink(lines, final, code)` decides WHERE the streamed output goes. Default is
+-- inline: replace the cell's owned fence body (at `mark`) with `lines`. A buffer
+-- sink (see buffer_sink) instead streams into a side buffer and updates a one-line
+-- reference. `final`/`code` are set only on the exit call.
+local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink)
+  local acc, err_data = "", {}
+  local n = 1 -- how many body lines we currently occupy (starts: the placeholder)
+  -- replace our [row, row+n) body region with `lines`; returns the new n.
+  local function inline_paint(lines)
+    if not vim.api.nvim_buf_is_valid(buf) then return end
+    local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
+    if not pos[1] then return end -- mark gone (cell re-run / cleared) -> stale
+    local out = {}
+    for _, l in ipairs(lines) do out[#out + 1] = indent .. l end
+    vim.api.nvim_buf_set_lines(buf, pos[1], pos[1] + n, false, out)
+    n = #out
+  end
+  local paint = sink or inline_paint
+  local function split_out()
+    local lines = vim.split(acc:gsub("\r", ""), "\n", { plain = true })
+    while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
+    return lines
+  end
+  local job = vim.fn.jobstart(argv, {
+    cwd = cwd,
+    stderr_buffered = true,
+    on_stdout = function(_, d)
+      if not d then return end
+      acc = acc .. table.concat(d, "\n")
+      vim.schedule(function()
+        local lines = split_out()
+        if #lines == 0 then return end -- nothing complete yet; keep the placeholder
+        if line_xform then for i, l in ipairs(lines) do lines[i] = line_xform(l) end end
+        paint(lines)
+      end)
+    end,
+    on_stderr = function(_, d) err_data = d or {} end,
+    on_exit = function(_, code)
+      vim.schedule(function()
+        local final = transform(split_out(), err_data, code)
+        paint(#final > 0 and final or { "(no output)" }, true, code)
+        pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
+        if inflight[buf] then inflight[buf][mark] = nil end
+      end)
+    end,
+  })
+  if job > 0 then
+    inflight[buf][mark] = job
+    pcall(vim.fn.chanclose, job, "stdin")
+  end
+end
+
+-- ───────────────────────── side-buffer output (<C-CR>) ───────────────────────
+-- <C-CR> on a cell streams its output into a separate scratch buffer instead of
+-- inline, leaving a compact `log` reference fence under the trigger. The buffer
+-- name `bsh://out/<doc>/<n>` is written INTO the fence and IS the durable link;
+-- `out_bufs` is just a session cache from that name to the live bufnr. The buffer
+-- is created only when the cell's fence doesn't already link a live one, so
+-- re-running a `tail -f` / dev-server cell reuses its buffer instead of littering.
+local out_bufs, out_seq = {}, 0
+
+-- Reuse the buffer the cell already links (via `link`, parsed from its `log`
+-- fence) if it's still alive; otherwise mint a fresh `bsh://out/<doc>/<n>`.
+local function ensure_out_buffer(link)
+  if link and out_bufs[link] and vim.api.nvim_buf_is_valid(out_bufs[link]) then
+    return out_bufs[link], link
+  end
+  out_seq = out_seq + 1
+  local doc = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t")
+  if doc == "" then doc = "scratch" end
+  local name = "bsh://out/" .. doc .. "/" .. out_seq
+  local b = vim.api.nvim_create_buf(true, false)
+  pcall(vim.api.nvim_buf_set_name, b, name)
+  vim.bo[b].buftype = "nofile"
+  vim.bo[b].bufhidden = "hide"
+  vim.bo[b].swapfile = false
+  out_bufs[name] = b
+  return b, name
+end
+
+-- If the cell at `trow` already owns a `log` fence, return its `bsh://out/…` link.
+local function existing_log_link(buf, trow)
+  local head = vim.api.nvim_buf_get_lines(buf, trow + 1, trow + 2, false)[1] or ""
+  if not head:match("^%s*```log%s*$") then return nil end
+  local body = vim.api.nvim_buf_get_lines(buf, trow + 2, trow + 3, false)[1] or ""
+  return body:match("(bsh://out/%S+)")
+end
+
+-- A sink that streams into `sidebuf` (follow/autoscroll) and keeps the cell's
+-- reference line (at `mark`) showing the link + live status.
+local function buffer_sink(buf, mark, indent, sidebuf, link)
+  return function(lines, final, code)
+    if vim.api.nvim_buf_is_valid(sidebuf) then
+      vim.api.nvim_buf_set_lines(sidebuf, 0, -1, false, lines)
+      for _, w in ipairs(vim.fn.win_findbuf(sidebuf)) do -- follow to bottom
+        pcall(vim.api.nvim_win_set_cursor, w, { math.max(1, #lines), 0 })
+      end
+    end
+    local status = link .. "  ·  " .. #lines .. (#lines == 1 and " line" or " lines")
+      .. "  ·  " .. (final and ("exit " .. (code or 0)) or "running…") .. "  ·  <CR> open"
+    if vim.api.nvim_buf_is_valid(buf) then
+      local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
+      if pos[1] then
+        vim.api.nvim_buf_set_lines(buf, pos[1], pos[1] + 1, false, { indent .. status })
+      end
+    end
+  end
+end
+
+-- Set up a side-buffer run for the cell at `trow`: reuse/mint the buffer (via
+-- `link`, if the cell already owns a `log` fence), clear it, stage the `log`
+-- reference fence, and return (mark, sink). Every run path's <C-CR> branch uses
+-- this, so the inline-vs-buffer fork stays a one-liner in each.
+local function begin_buffer_run(buf, trow, indent, link)
+  local sidebuf, name = ensure_out_buffer(link)
+  vim.api.nvim_buf_set_lines(sidebuf, 0, -1, false, {}) -- clear for a fresh stream
+  local mark = stage_fence(buf, trow, indent, "log", name .. "  ·  running…  ·  <CR> open")
+  return mark, buffer_sink(buf, mark, indent, sidebuf, name)
+end
+
+-- Open a cell's output buffer (from its `bsh://out/…` link) in a split.
+local function open_out_buffer(name)
+  local b = out_bufs[name]
+  if not (b and vim.api.nvim_buf_is_valid(b)) then
+    vim.notify("bsh: output buffer " .. name .. " is closed (ephemeral, gone)",
+      vim.log.levels.WARN)
+    return
+  end
+  vim.cmd("split")
+  vim.api.nvim_win_set_buf(0, b)
+  vim.cmd("normal! G")
+end
+
+-- Shell-style result: stdout, then any stderr, then a non-zero exit note.
+local function shell_transform(out_data, err_data, code)
+  local lines = {}
+  while #out_data > 0 and out_data[#out_data] == "" do table.remove(out_data) end
+  vim.list_extend(lines, out_data)
+  local errs = {}
+  for _, l in ipairs(err_data) do if l ~= "" then errs[#errs + 1] = l end end
+  if #errs > 0 then
+    if #lines > 0 then lines[#lines + 1] = "" end
+    lines[#lines + 1] = "[stderr]"
+    vim.list_extend(lines, errs)
+  end
+  if code ~= 0 then lines[#lines + 1] = "[exit " .. code .. "]" end
+  return lines
+end
+
+-- The document's directory (local cells run there); remote cells ignore cwd.
+local function doc_cwd(buf)
+  local cwd = vim.fn.expand("#" .. buf .. ":p:h")
+  if cwd == "" or vim.fn.isdirectory(cwd) == 0 then cwd = vim.fn.getcwd() end
+  return cwd
+end
+
+-- `$ <cmd>` (or `<user@host>$ <cmd>`) : run a shell command. Output goes inline
+-- in an `out` fence; with `to_buf` (<C-CR>), into a side buffer with a `log`
+-- reference fence. A cell that already owns a `log` fence stays routed there even
+-- on a plain <CR> (sticky), reusing that same buffer.
+local function run_shell(buf, trow, indent, target, cmd, to_buf)
+  local link = existing_log_link(buf, trow)
+  if link then to_buf = true end -- sticky: keep an opted-in cell on its buffer
+  local remote = target ~= ""
+  local cwd = remote and nil or doc_cwd(buf)
+  if to_buf then
+    local mark, sink = begin_buffer_run(buf, trow, indent, link)
+    run_job(buf, indent, mark, build_argv(target, cmd), cwd, shell_transform, nil, sink)
+    return
+  end
+  local mark = stage_fence(buf, trow, indent, "out",
+    remote and ("...running on " .. target .. "...") or "...running...")
+  run_job(buf, indent, mark, build_argv(target, cmd), cwd, shell_transform)
+end
+
+-- A one-shot (`$`) run of an explicit argv (used for non-shell one-shots like
+-- `python $`; shell one-shots go through run_shell/build_argv). Inline by default;
+-- `to_buf` (<C-CR>, or sticky) routes it to a side buffer like everything else.
+local function run_oneshot(buf, trow, indent, argv, to_buf)
+  local link = existing_log_link(buf, trow)
+  if link then to_buf = true end
+  if to_buf then
+    local mark, sink = begin_buffer_run(buf, trow, indent, link)
+    run_job(buf, indent, mark, argv, doc_cwd(buf), shell_transform, nil, sink)
+    return
+  end
+  local mark = stage_fence(buf, trow, indent, "out", "...running...")
+  run_job(buf, indent, mark, argv, doc_cwd(buf), shell_transform)
+end
+
+M.build_argv = build_argv
+M.run_job = run_job
+M.shell_transform = shell_transform
+M.doc_cwd = doc_cwd
+M.existing_log_link = existing_log_link
+M.begin_buffer_run = begin_buffer_run
+M.open_out_buffer = open_out_buffer
+M.run_shell = run_shell
+M.run_oneshot = run_oneshot
+return M
