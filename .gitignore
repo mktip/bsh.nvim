@@ -13,3 +13,7 @@
 
 # test deps (vendored mini.nvim)
 /deps/
+
+# typst build artifacts
+/typst/*.pdf
+/typst/*.png
