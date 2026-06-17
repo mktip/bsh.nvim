@@ -24,6 +24,12 @@ local util = require("bsh.util")
 local join_path, parse_list_args, qpath = util.join_path, util.parse_list_args, util.qpath
 local tree_entry, parse_runmarker = util.tree_entry, util.parse_runmarker
 
+local fence = require("bsh.fence")
+local ns, inflight = fence.ns, fence.inflight
+local fence_range, clear_inflight = fence.fence_range, fence.clear_inflight
+local stage_block, stage_fence, fill_fence = fence.stage_block, fence.stage_fence, fence.fill_fence
+M.foldexpr, M.foldtext = fence.foldexpr, fence.foldtext -- re-export (attach() uses require'bsh'.foldexpr)
+
 -- Remote (`user@host$ cmd`) cells run in a login shell so the remote profile
 -- and bashrc load (PATH, pkg, env). Set false for a bare, faster `ssh host cmd`
 -- when the remote already has the env you need or you want zero startup files.
@@ -46,84 +52,6 @@ M.scaffold_lang = "sh"
 -- silently scaffold). Overridable for customisation / tests; return true = go.
 M.confirm = function(prompt)
   return vim.fn.confirm(prompt, "&Yes\n&No", 2) == 1
-end
-
-local ns = vim.api.nvim_create_namespace("bsh")
-
--- in-flight shell jobs, keyed by buffer then by the body extmark id, so a cell
--- re-run can cancel its own still-running job before staging a fresh fence.
-local inflight = {}
-
--- Locate (or plan the insertion of) the result fence that belongs to the
--- trigger on 0-indexed row `trow`. The owned fence must begin on the very next
--- line as `<indent>```<tag>` (tag is "out" for shell, "dir" for listings).
--- Returns the inclusive 0-indexed row range [start, stop) currently occupied by
--- a fence (empty range = none yet, insert a fresh one right after the trigger).
-local OWNED_TAGS = { out = true, dir = true, tree = true, agent = true, log = true }
-local function fence_range(buf, trow, indent, tag)
-  local open = trow + 1
-  local total = vim.api.nvim_buf_line_count(buf)
-  if open >= total then return open, open end
-  local l = vim.api.nvim_buf_get_lines(buf, open, open + 1, false)[1] or ""
-  -- Match ANY owned tag, not just `tag`: when a trigger's output changes kind
-  -- (e.g. an `out` cell edited into a `dir` listing) the existing fence must be
-  -- recognised as ours and REPLACED, not left orphaned above the new one.
-  local existing = l:match("^%s*```(%S+)%s*$")
-  if not (existing and OWNED_TAGS[existing]) then return open, open end
-  -- found an owned opening fence; scan for its closing ```
-  for r = open + 1, total - 1 do
-    local ll = vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or ""
-    if ll:match("^%s*```%s*$") then return open, r + 1 end
-  end
-  -- unterminated fence: treat just the opening line as the region
-  return open, open + 1
-end
-
--- Cancel any still-running job whose body anchor lives in rows [start, stop)
--- (its on_exit becomes a no-op once its mark is gone) and drop those marks.
-local function clear_inflight(buf, start, stop)
-  inflight[buf] = inflight[buf] or {}
-  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, { start, 0 }, { stop, -1 }, {})) do
-    local id, job = m[1], inflight[buf][m[1]]
-    if job then pcall(vim.fn.jobstop, job); inflight[buf][id] = nil end
-    pcall(vim.api.nvim_buf_del_extmark, buf, ns, id)
-  end
-end
-
--- Replace rows [start, stop) with { open, placeholder, close } and return an
--- extmark anchoring the START of the body, so the async result lands exactly
--- there even if the buffer shifts meanwhile. LEFT gravity (right_gravity=false)
--- so that when streaming repaints the body via set_lines over [mark, mark+n),
--- the mark stays pinned at the body's top instead of being pushed below it.
-local function stage_block(buf, start, stop, open, placeholder, close)
-  clear_inflight(buf, start, stop)
-  vim.api.nvim_buf_set_lines(buf, start, stop, false, { open, placeholder, close })
-  return vim.api.nvim_buf_set_extmark(buf, ns, start + 1, 0, { right_gravity = false })
-end
-
--- Drop a fresh `<tag>` fence with a placeholder body in place of any existing one.
-local function stage_fence(buf, trow, indent, tag, placeholder)
-  local start, stop = fence_range(buf, trow, indent, tag)
-  return stage_block(buf, start, stop,
-    indent .. "```" .. tag, indent .. placeholder, indent .. "```")
-end
-
--- Replace the placeholder body line (located via its extmark) with `lines`,
--- each indented to match the trigger. The closing fence below it is untouched.
-local function fill_fence(buf, mark, indent, lines)
-  vim.schedule(function()
-    if not vim.api.nvim_buf_is_valid(buf) then return end
-    local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
-    if not pos[1] then return end
-    local row = pos[1]
-    local out = {}
-    for _, l in ipairs(#lines > 0 and lines or { "(no output)" }) do
-      out[#out + 1] = indent .. l
-    end
-    vim.api.nvim_buf_set_lines(buf, row, row + 1, false, out)
-    pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
-    if inflight[buf] then inflight[buf][mark] = nil end
-  end)
 end
 
 -- Build the argv to run a command string on `target`. Local (target == "")
@@ -1100,40 +1028,6 @@ local function execute_cell(to_buf)
   end
 
   return false
-end
-
--- Folding: each fence (opening line through its closing ```) is its OWN fold;
--- the trigger line and surrounding prose stay at level 0 and visible.
--- We force a fold boundary at every fence so that ADJACENT fences with no blank
--- line between them -- e.g. a multiline input fence's closing ``` immediately
--- followed by the ```out result opener -- become two separate folds instead of
--- one merged blob. `>1` starts a fold at an opening fence, `<1` ends it at the
--- closing ```; content scans upward to decide inside (1) vs prose (0).
-local OPEN = "^%s*```%S"
-local FENCE = "^%s*```%s*$"
-
-function M.foldexpr(lnum)
-  local line = vim.fn.getline(lnum)
-  if line:match(OPEN) then return ">1" end   -- opening fence starts a new fold
-  if line:match(FENCE) then return "<1" end  -- closing ``` ends the fold here
-  for l = lnum - 1, 1, -1 do
-    local s = vim.fn.getline(l)
-    if s:match(OPEN) then return "1" end   -- inside a fence body
-    if s:match(FENCE) then return "0" end  -- the fence above was a closer
-  end
-  return "0"
-end
-
--- Collapsed cells read as `  ▸ out (N lines)` / `  ▸ dir (N entries)`
--- (N = body lines, fences excluded; tag taken from the opening fence).
-function M.foldtext()
-  local open = vim.fn.getline(vim.v.foldstart)
-  local indent = open:match("^(%s*)")
-  local tag = open:match("```(%S+)") or "out"
-  local n = vim.v.foldend - vim.v.foldstart - 1
-  local unit = tag == "dir" and (n == 1 and " entry)" or " entries)")
-    or (n == 1 and " line)" or " lines)")
-  return indent .. "▸ " .. tag .. " (" .. n .. unit
 end
 
 -- Turn ANY buffer into a lab: the cell-running <CR>, comment style and folding,
