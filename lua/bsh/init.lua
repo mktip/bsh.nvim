@@ -900,24 +900,26 @@ local function execute_cell()
   return false
 end
 
--- Folding: each owned result fence (opening line through its closing ```) is one
--- fold; the trigger line and surrounding prose stay at level 0 and visible.
--- A line's level is decided by scanning upward to the nearest fence: an opening
--- fence (``` plus an info string, e.g. ```out / ```dir) means we're inside
--- (level 1), a bare closing ``` means we're back outside (0). Cheap for the
--- small buffers this is used on.
+-- Folding: each fence (opening line through its closing ```) is its OWN fold;
+-- the trigger line and surrounding prose stay at level 0 and visible.
+-- We force a fold boundary at every fence so that ADJACENT fences with no blank
+-- line between them -- e.g. a multiline input fence's closing ``` immediately
+-- followed by the ```out result opener -- become two separate folds instead of
+-- one merged blob. `>1` starts a fold at an opening fence, `<1` ends it at the
+-- closing ```; content scans upward to decide inside (1) vs prose (0).
 local OPEN = "^%s*```%S"
 local FENCE = "^%s*```%s*$"
 
 function M.foldexpr(lnum)
   local line = vim.fn.getline(lnum)
-  if line:match(OPEN) or line:match(FENCE) then return 1 end
+  if line:match(OPEN) then return ">1" end   -- opening fence starts a new fold
+  if line:match(FENCE) then return "<1" end  -- closing ``` ends the fold here
   for l = lnum - 1, 1, -1 do
     local s = vim.fn.getline(l)
-    if s:match(OPEN) then return 1 end   -- inside an out fence
-    if s:match(FENCE) then return 0 end  -- the fence above was a closer
+    if s:match(OPEN) then return "1" end   -- inside a fence body
+    if s:match(FENCE) then return "0" end  -- the fence above was a closer
   end
-  return 0
+  return "0"
 end
 
 -- Collapsed cells read as `  ▸ out (N lines)` / `  ▸ dir (N entries)`
