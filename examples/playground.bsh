@@ -5,9 +5,13 @@ in place -- the ```out / ```dir blocks below a cell are owned by bsh. `za` folds
 a result block. This file is a `.bsh`, so cells are live the moment you open it.
 
 
-## one-shot shell
+## one-shot shell   (<CR> = inline output; <C-CR> or g<CR> = output to a side buffer)
 
 $ echo "hello from a fresh shell"; uname -s
+
+## try g<CR> on the next line: output goes to a bsh://out buffer, <CR> the ref to open it
+
+$ for i in $(seq 5); do echo "line $i"; done
 
 
 ## persistent session -- env / cwd carry across cells

@@ -40,6 +40,21 @@ session, no marker is inert (so plain code blocks stay dead).
 
 Output streams live. Each result fence folds to a one-line summary.
 
+### Run keys: inline vs a side buffer
+
+- **`<CR>`** runs the cell and shows output **inline**, in an owned fence below it.
+- **`<C-CR>`** (or **`g<CR>`**) runs it but streams output into a **side buffer** —
+  for long logs, `tail -f`, a dev server. The cell shows a compact `log`
+  reference (`bsh://out/…`); `<CR>` on that line opens the buffer. The buffer is
+  reused on re-run (no litter), and a cell that has a `log` fence stays routed
+  there even on a plain `<CR>` — delete the fence to go back inline.
+
+> **Terminal note:** many terminal emulators don't send `<C-CR>` distinctly from
+> `<CR>` unless they speak the *kitty keyboard protocol* (kitty, foot, WezTerm,
+> Ghostty, …). If `<C-CR>` does nothing special in your terminal, either enable
+> that passthrough / "report all keys" in its config, or just use the always-works
+> **`g<CR>`** fallback (or remap it: `vim.keymap.set("n", "<your-key>", …)`).
+
 ### `$BSH_HOME` — a command namespace
 
 Point `$BSH_HOME` at a directory and its tree *is* a dotted command namespace,

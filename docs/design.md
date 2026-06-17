@@ -276,7 +276,22 @@ Pick targets that show the namespace+listing model off, à la Xiki:
   changes), `git.wip`, `git.sync`. Great with the `bsh`-in-a-session cwd story.
 - Others that fit: `http.get <url>`, `json.*`, `notes.*`, `docker.*`.
 
-## Output to a side buffer (a gesture, not a marker)
+## Output to a side buffer (a gesture, not a marker) — BUILT v1 (2026-06-17)
+
+**Built (v1):** `<C-CR>` / `g<CR>` runs `$` and namespace cells with output into a
+side buffer (`run_shell`'s `to_buf` path). The buffer is an unbounded `nofile`
+scratch named `bsh://out/<doc>/<n>`; that name is written into an owned ` ```log `
+reference fence and IS the durable link; `out_bufs` caches name→bufnr.
+`buffer_sink` streams stdout in (follow/autoscroll) and keeps the reference line's
+status (`<link> · N lines · running…/exit C · <CR> open`). Re-run reuses the
+linked buffer (only `ensure_out_buffer` mints a new one when there's no live
+link); a cell that owns a `log` fence is sticky on a plain `<CR>` too; `<CR>` on
+the reference line opens the buffer (`open_out_buffer`). `log` is in `OWNED_TAGS`
+so re-runs replace the fence. **Not yet:** `$$`/`python $$` sessions and `:`
+listings still go inline; persist-on-`:w` to a real `bsh:file:` path; an explicit
+stop keymap (re-run already restarts; `M.stop_session` on wipe).
+
+Original rationale + spec below.
 
 Some output shouldn't live inline under the cell: long build logs, `tail -f`, a
 dev server, anything you want to scroll/search separately. The cell should leave a
@@ -306,8 +321,9 @@ So: output destination is a **second keybinding**, available on **every** cell:
 The side buffer (hard constraint the user named: it **does not necessarily exist
 on disk and must not be persisted preemptively** — huge / infinite / sensitive):
 
-- **Ephemeral + bounded:** a scratch `nofile` buffer `bsh://out/<doc>/<n>`, kept
-  as a **ring** (capped lines) so infinite streams can't OOM, with
+- **Ephemeral + unbounded:** a scratch `nofile` buffer `bsh://out/<doc>/<n>` that
+  accumulates ALL output (user's call: completeness over OOM-safety — a 50k-line
+  build log stays whole; a runaway `tail -f` is stopped by hand), with
   follow/autoscroll and an easy **stop**.
 - **The cell shows a reference fence**, not content — an owned ` ```log ` fence
   with a one-line live status:

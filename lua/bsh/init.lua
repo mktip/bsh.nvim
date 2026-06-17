@@ -55,7 +55,7 @@ local inflight = {}
 -- line as `<indent>```<tag>` (tag is "out" for shell, "dir" for listings).
 -- Returns the inclusive 0-indexed row range [start, stop) currently occupied by
 -- a fence (empty range = none yet, insert a fresh one right after the trigger).
-local OWNED_TAGS = { out = true, dir = true, tree = true, agent = true }
+local OWNED_TAGS = { out = true, dir = true, tree = true, agent = true, log = true }
 local function fence_range(buf, trow, indent, tag)
   local open = trow + 1
   local total = vim.api.nvim_buf_line_count(buf)
@@ -146,11 +146,15 @@ end
 -- `transform(out_lines, err_lines, code) -> lines` (the authoritative final
 -- render). `line_xform`, if given, post-processes each line of the live preview
 -- (e.g. neutralising ``` in agent output). stdin is closed so commands see EOF.
-local function run_job(buf, indent, mark, argv, cwd, transform, line_xform)
+-- `sink(lines, final, code)` decides WHERE the streamed output goes. Default is
+-- inline: replace the cell's owned fence body (at `mark`) with `lines`. A buffer
+-- sink (see buffer_sink) instead streams into a side buffer and updates a one-line
+-- reference. `final`/`code` are set only on the exit call.
+local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink)
   local acc, err_data = "", {}
   local n = 1 -- how many body lines we currently occupy (starts: the placeholder)
   -- replace our [row, row+n) body region with `lines`; returns the new n.
-  local function paint(lines)
+  local function inline_paint(lines)
     if not vim.api.nvim_buf_is_valid(buf) then return end
     local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
     if not pos[1] then return end -- mark gone (cell re-run / cleared) -> stale
@@ -159,6 +163,7 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform)
     vim.api.nvim_buf_set_lines(buf, pos[1], pos[1] + n, false, out)
     n = #out
   end
+  local paint = sink or inline_paint
   local function split_out()
     local lines = vim.split(acc:gsub("\r", ""), "\n", { plain = true })
     while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
@@ -181,7 +186,7 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform)
     on_exit = function(_, code)
       vim.schedule(function()
         local final = transform(split_out(), err_data, code)
-        paint(#final > 0 and final or { "(no output)" })
+        paint(#final > 0 and final or { "(no output)" }, true, code)
         pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
         if inflight[buf] then inflight[buf][mark] = nil end
       end)
@@ -191,6 +196,76 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform)
     inflight[buf][mark] = job
     pcall(vim.fn.chanclose, job, "stdin")
   end
+end
+
+-- ───────────────────────── side-buffer output (<C-CR>) ───────────────────────
+-- <C-CR> on a cell streams its output into a separate scratch buffer instead of
+-- inline, leaving a compact `log` reference fence under the trigger. The buffer
+-- name `bsh://out/<doc>/<n>` is written INTO the fence and IS the durable link;
+-- `out_bufs` is just a session cache from that name to the live bufnr. The buffer
+-- is created only when the cell's fence doesn't already link a live one, so
+-- re-running a `tail -f` / dev-server cell reuses its buffer instead of littering.
+local out_bufs, out_seq = {}, 0
+
+-- Reuse the buffer the cell already links (via `link`, parsed from its `log`
+-- fence) if it's still alive; otherwise mint a fresh `bsh://out/<doc>/<n>`.
+local function ensure_out_buffer(link)
+  if link and out_bufs[link] and vim.api.nvim_buf_is_valid(out_bufs[link]) then
+    return out_bufs[link], link
+  end
+  out_seq = out_seq + 1
+  local doc = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t")
+  if doc == "" then doc = "scratch" end
+  local name = "bsh://out/" .. doc .. "/" .. out_seq
+  local b = vim.api.nvim_create_buf(true, false)
+  pcall(vim.api.nvim_buf_set_name, b, name)
+  vim.bo[b].buftype = "nofile"
+  vim.bo[b].bufhidden = "hide"
+  vim.bo[b].swapfile = false
+  out_bufs[name] = b
+  return b, name
+end
+
+-- If the cell at `trow` already owns a `log` fence, return its `bsh://out/…` link.
+local function existing_log_link(buf, trow)
+  local head = vim.api.nvim_buf_get_lines(buf, trow + 1, trow + 2, false)[1] or ""
+  if not head:match("^%s*```log%s*$") then return nil end
+  local body = vim.api.nvim_buf_get_lines(buf, trow + 2, trow + 3, false)[1] or ""
+  return body:match("(bsh://out/%S+)")
+end
+
+-- A sink that streams into `sidebuf` (follow/autoscroll) and keeps the cell's
+-- reference line (at `mark`) showing the link + live status.
+local function buffer_sink(buf, mark, indent, sidebuf, link)
+  return function(lines, final, code)
+    if vim.api.nvim_buf_is_valid(sidebuf) then
+      vim.api.nvim_buf_set_lines(sidebuf, 0, -1, false, lines)
+      for _, w in ipairs(vim.fn.win_findbuf(sidebuf)) do -- follow to bottom
+        pcall(vim.api.nvim_win_set_cursor, w, { math.max(1, #lines), 0 })
+      end
+    end
+    local status = link .. "  ·  " .. #lines .. (#lines == 1 and " line" or " lines")
+      .. "  ·  " .. (final and ("exit " .. (code or 0)) or "running…") .. "  ·  <CR> open"
+    if vim.api.nvim_buf_is_valid(buf) then
+      local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
+      if pos[1] then
+        vim.api.nvim_buf_set_lines(buf, pos[1], pos[1] + 1, false, { indent .. status })
+      end
+    end
+  end
+end
+
+-- Open a cell's output buffer (from its `bsh://out/…` link) in a split.
+local function open_out_buffer(name)
+  local b = out_bufs[name]
+  if not (b and vim.api.nvim_buf_is_valid(b)) then
+    vim.notify("bsh: output buffer " .. name .. " is closed (ephemeral, gone)",
+      vim.log.levels.WARN)
+    return
+  end
+  vim.cmd("split")
+  vim.api.nvim_win_set_buf(0, b)
+  vim.cmd("normal! G")
 end
 
 -- Shell-style result: stdout, then any stderr, then a non-zero exit note.
@@ -226,13 +301,26 @@ local function ns_home()
   return vim.fn.isdirectory(h) == 1 and h or ""
 end
 
--- `$ <cmd>` (or `<user@host>$ <cmd>`) : run a shell command into an `out` fence.
-local function run_shell(buf, trow, indent, target, cmd)
+-- `$ <cmd>` (or `<user@host>$ <cmd>`) : run a shell command. Output goes inline
+-- in an `out` fence; with `to_buf` (<C-CR>), into a side buffer with a `log`
+-- reference fence. A cell that already owns a `log` fence stays routed there even
+-- on a plain <CR> (sticky), reusing that same buffer.
+local function run_shell(buf, trow, indent, target, cmd, to_buf)
+  local link = existing_log_link(buf, trow)
+  if link then to_buf = true end -- sticky: keep an opted-in cell on its buffer
   local remote = target ~= ""
+  local cwd = remote and nil or doc_cwd(buf)
+  if to_buf then
+    local sidebuf, name = ensure_out_buffer(link)
+    vim.api.nvim_buf_set_lines(sidebuf, 0, -1, false, {}) -- clear for a fresh stream
+    local mark = stage_fence(buf, trow, indent, "log", name .. "  ·  starting…  ·  <CR> open")
+    run_job(buf, indent, mark, build_argv(target, cmd), cwd, shell_transform, nil,
+      buffer_sink(buf, mark, indent, sidebuf, name))
+    return
+  end
   local mark = stage_fence(buf, trow, indent, "out",
     remote and ("...running on " .. target .. "...") or "...running...")
-  run_job(buf, indent, mark, build_argv(target, cmd),
-    remote and nil or doc_cwd(buf), shell_transform)
+  run_job(buf, indent, mark, build_argv(target, cmd), cwd, shell_transform)
 end
 
 -- ──────────────────────── persistent language sessions ───────────────────────
@@ -721,10 +809,10 @@ end
 -- goes through `$`'s one-shot shell, giving redirection, pipes, globs, `$(...)`
 -- sub-shells -- everything the outer shell does. The path is quoted; args are not
 -- (they ARE shell syntax). Runs in the document's dir, like `$`.
-local function run_ns_exec(buf, trow, indent, path, args)
+local function run_ns_exec(buf, trow, indent, path, args, to_buf)
   local cmd = vim.fn.shellescape(path)
   if args and args ~= "" then cmd = cmd .. " " .. args end
-  run_shell(buf, trow, indent, "", cmd)
+  run_shell(buf, trow, indent, "", cmd, to_buf)
 end
 
 -- A `namespace` cell resolves a dotted name to a path under $BSH_HOME (dots ->
@@ -742,7 +830,7 @@ end
 -- leaf/`.enter` as shell args; for a plain directory it's meaningless, so
 -- `<dir> <args>` falls through to prose.
 -- Returns true if it resolved+handled, false (prose) otherwise.
-local function run_namespace(buf, trow, indent, dotted, args)
+local function run_namespace(buf, trow, indent, dotted, args, to_buf)
   args = args or ""
   local home = ns_home()
   if home == "" then return false end
@@ -754,7 +842,7 @@ local function run_namespace(buf, trow, indent, dotted, args)
   if vim.fn.isdirectory(base) == 1 then
     local enter = base .. "/.enter"
     if not force_list and vim.fn.executable(enter) == 1 then
-      run_ns_exec(buf, trow, indent, enter, args)
+      run_ns_exec(buf, trow, indent, enter, args, to_buf)
     elseif args ~= "" then
       return false -- `<dir> <args>` with nothing to run -> prose
     else
@@ -773,7 +861,7 @@ local function run_namespace(buf, trow, indent, dotted, args)
   for _, p in ipairs(cands) do
     if vim.fn.filereadable(p) == 1 then
       if vim.fn.executable(p) == 1 then
-        run_ns_exec(buf, trow, indent, p, args) -- run by shebang, through the shell
+        run_ns_exec(buf, trow, indent, p, args, to_buf) -- run by shebang, through the shell
       else
         vim.notify("bsh: " .. p .. " is not executable (chmod +x it)", vim.log.levels.WARN)
       end
@@ -878,11 +966,15 @@ end
 
 -- Dispatch on the current line. Returns true if something was handled, false to
 -- let <CR> fall through to its default.
-local function execute_cell()
+local function execute_cell(to_buf)
   local buf = vim.api.nvim_get_current_buf()
   local trow = vim.api.nvim_win_get_cursor(0)[1] - 1
   local line = vim.api.nvim_buf_get_lines(buf, trow, trow + 1, false)[1] or ""
   local indent = line:match("^(%s*)")
+
+  -- <CR> on a `log` reference line opens that cell's output buffer in a split.
+  local outlink = line:match("(bsh://out/%S+)")
+  if outlink then open_out_buffer(outlink); return true end
 
   -- Cursor inside a `$`/`$$` (or `python $`/`$$`) input fence: run the WHOLE
   -- block (multiline). The owned `out` fence is staged just after the block's
@@ -894,7 +986,7 @@ local function execute_cell()
       if fc.session then -- local or remote (`user@host$$`) persistent shell
         run_session(buf, "sh", fc.target, fc.close, fc.indent, fc.body)
       else
-        run_shell(buf, fc.close, fc.indent, fc.target, fc.body)
+        run_shell(buf, fc.close, fc.indent, fc.target, fc.body, to_buf)
       end
     elseif fc.target ~= "" then
       vim.notify("bsh: remote " .. fc.lang .. " cells aren't supported yet",
@@ -916,7 +1008,7 @@ local function execute_cell()
     if sdbl == "$$" then
       run_session(buf, "sh", stgt, trow, indent, scmd)
     else
-      run_shell(buf, trow, indent, stgt, scmd)
+      run_shell(buf, trow, indent, stgt, scmd, to_buf)
     end
     return true
   end
@@ -1023,11 +1115,11 @@ local function execute_cell()
   -- continuation. Checked last and gated on the FIRST token resolving, so prose
   -- (which won't resolve) falls through untouched -- args form tried first.
   local nsname, nsargs = line:match("^%s*([%w_][%w_%.%-]*)%s+(.+)$")
-  if nsname and run_namespace(buf, trow, indent, nsname, nsargs) then
+  if nsname and run_namespace(buf, trow, indent, nsname, nsargs, to_buf) then
     return true
   end
   local dotted = line:match("^%s*([%w_][%w_%.%-]*)%s*$")
-  if dotted and run_namespace(buf, trow, indent, dotted) then
+  if dotted and run_namespace(buf, trow, indent, dotted, nil, to_buf) then
     return true
   end
 
@@ -1086,12 +1178,21 @@ function M.attach(buf)
     vim.opt_local.fillchars:append("fold: ")
   end)
 
-  vim.keymap.set("n", "<CR>", function()
-    if not execute_cell() then
+  local function run_here(to_buf)
+    if not execute_cell(to_buf) then
       -- not a cell: preserve the default <CR> (down to first non-blank)
       vim.cmd("normal! +")
     end
-  end, { buffer = buf, desc = "bsh: run cell under cursor" })
+  end
+  vim.keymap.set("n", "<CR>", function() run_here(false) end,
+    { buffer = buf, desc = "bsh: run cell (output inline)" })
+  -- <C-CR> (and the always-works fallback g<CR>): run with output in a side buffer.
+  -- NOTE: many terminals don't pass <C-CR> distinctly from <CR> unless they speak
+  -- the kitty keyboard protocol -- hence the g<CR> fallback (see README).
+  vim.keymap.set("n", "<C-CR>", function() run_here(true) end,
+    { buffer = buf, desc = "bsh: run cell (output to side buffer)" })
+  vim.keymap.set("n", "g<CR>", function() run_here(true) end,
+    { buffer = buf, desc = "bsh: run cell (output to side buffer)" })
 end
 
 M.config = function()
