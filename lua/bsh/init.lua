@@ -167,6 +167,23 @@ local function execute_cell(to_buf)
     end
   end
 
+  -- `.bsh.typ` (typst mode): the run marker is `%`/`%%` instead of `$`/`$$` (so
+  -- `$` stays Typst math), and the owned result is a `#cell(...)` ELEMENT, not an
+  -- ```out fence -- run_shell stages it when vim.b.bsh_typst is set. v1 wires the
+  -- one-shot `%` (and routed `host% cmd`); `%%` sessions are not wired yet.
+  if vim.b[buf].bsh_typst then
+    local ptgt, pdbl, pcmd = line:match("^%s*(%S-)(%%%%?)%s+(.+)$")
+    if pcmd then
+      if pdbl == "%%" then
+        vim.notify("bsh: %% sessions in .bsh.typ aren't wired yet (use % one-shot)",
+          vim.log.levels.WARN)
+      else
+        run_shell(buf, trow, indent, ptgt, pcmd, to_buf)
+      end
+      return true
+    end
+  end
+
   -- inline shell: `[user@host]$ cmd` (one-shot) or `[user@host]$$ cmd` (shared
   -- session, local or remote). One unified match: the marker is `$`/`$$` and the
   -- greedy `%$?` captures the doubled form, so `user@host$$ cmd` parses
@@ -302,7 +319,9 @@ function M.attach(buf)
   if vim.b[buf].bsh_attached then return end
   vim.b[buf].bsh_attached = true
 
-  vim.bo[buf].commentstring = "<!-- %s -->"
+  -- typst comments are `//` (markdown/prose buffers use HTML comments) -- the
+  -- comment style is also how a `% cmd` trigger is hidden from the typeset PDF.
+  vim.bo[buf].commentstring = vim.b[buf].bsh_typst and "// %s" or "<!-- %s -->"
   -- fold each result fence; start fully open (za on the trigger toggles one)
   vim.api.nvim_buf_call(buf, function()
     vim.opt_local.foldmethod = "expr"
@@ -338,6 +357,7 @@ M.config = function()
     pattern = {
       ["%.bsh%.md$"] = "markdown",
       ["%.bsh%.markdown$"] = "markdown",
+      ["%.bsh%.typ$"] = "typst", -- keep typst highlighting; attach below
     },
   })
 
@@ -351,6 +371,15 @@ M.config = function()
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile" }, {
     pattern = { "*.bsh.md", "*.bsh.markdown" },
     callback = function(args) M.attach(args.buf) end,
+  })
+  -- ...and on `*.bsh.typ`: mark the buffer typst-mode (so `%` is the run marker
+  -- and the result is a `#cell` element) BEFORE attaching.
+  vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile" }, {
+    pattern = { "*.bsh.typ" },
+    callback = function(args)
+      vim.b[args.buf].bsh_typst = true
+      M.attach(args.buf)
+    end,
   })
 
   -- tear a buffer's persistent `$$` shell down when the buffer is wiped.
@@ -370,6 +399,34 @@ M.config = function()
       vim.bo.bufhidden = "hide"
     end
   end, { bang = true, desc = "open a scratch bsh buffer (! = attach to current)" })
+
+  -- :BshTypeset -> compile the current `.typ` (a bsh session) to PDF beside it.
+  -- The buffer is the source as-is (single-source: the `#cell` elements bsh wrote
+  -- ARE valid Typst), so this is just `typst compile` with a friendly report.
+  vim.api.nvim_create_user_command("BshTypeset", function()
+    local src = vim.api.nvim_buf_get_name(0)
+    if not src:match("%.typ$") then
+      vim.notify("bsh: :BshTypeset needs a .typ buffer", vim.log.levels.WARN)
+      return
+    end
+    vim.cmd("write")
+    local out = src:gsub("%.typ$", ".pdf")
+    vim.notify("bsh: typesetting " .. vim.fn.fnamemodify(out, ":t") .. "…")
+    vim.fn.jobstart({ "typst", "compile", src, out }, {
+      stderr_buffered = true,
+      on_stderr = function(_, d) if d and #table.concat(d) > 0 then M._typst_err = d end end,
+      on_exit = function(_, code)
+        vim.schedule(function()
+          if code == 0 then
+            vim.notify("bsh: typeset → " .. vim.fn.fnamemodify(out, ":~"))
+          else
+            vim.notify("bsh: typst failed:\n" .. table.concat(M._typst_err or {}, "\n"),
+              vim.log.levels.ERROR)
+          end
+        end)
+      end,
+    })
+  end, { desc = "compile the current .typ bsh session to PDF" })
 end
 
 -- Public option surface: `require('bsh').python`, `…remote_login`, etc. proxy to

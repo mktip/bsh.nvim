@@ -32,6 +32,7 @@ function M.bootstrap(child, opts)
     if opts.noconfirm then B.confirm = function() return true end end
     vim.cmd('enew')
     if opts.name then vim.api.nvim_buf_set_name(0, opts.name) end
+    if opts.typst then vim.b.bsh_typst = true end -- `.bsh.typ` mode (% marker, #cell)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, opts.lines or {})
     B.attach(0)
   ]],

@@ -108,7 +108,11 @@ end
 -- REPLACED by that cell (cursor parked at its end) -- so a command can hand back a
 -- ready-to-run cell (e.g. `docker@<id>$$ `) instead of output. Takes precedence
 -- over normal painting/retag.
-local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag, on_cell)
+-- `finalize(code)` (inline only): called once on exit, AFTER the body is painted
+-- and while the body extmark is still valid, before it's dropped -- so an owner
+-- can patch its opener with post-run facts (the typst `#cell` uses it to write
+-- the now-known exit code into the opener's `code:` field).
+local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag, on_cell, finalize)
   local acc, err_data = "", {}
   local n = 1 -- how many body lines we currently occupy (starts: the placeholder)
   -- replace our [row, row+n) body region with `lines`; returns the new n.
@@ -170,6 +174,9 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
           end
         end
         paint(#final > 0 and final or { "(no output)" }, true, code)
+        -- inline only: patch the opener with post-run facts (typst #cell exit code)
+        -- while the body extmark still resolves the region.
+        if finalize and not sink and vim.api.nvim_buf_is_valid(buf) then finalize(code) end
         -- inline only: let the command re-tag its own fence by exit code (e.g.
         -- exit 150 -> `menu`). The body extmark still resolves the body top, so
         -- the opening delimiter is the line just above it.
@@ -312,6 +319,21 @@ local function run_shell(buf, trow, indent, target, cmd, to_buf, opts)
   if to_buf then
     local mark, sink = begin_buffer_run(buf, trow, indent, link)
     run_job(buf, indent, mark, build_argv(target, cmd), cwd, transform, nil, sink)
+    return
+  end
+  -- `.bsh.typ`: the owned result is a `#cell(...)` element (structured -> a card),
+  -- not an ```out fence. Stage it from the command + run-context, and patch the
+  -- now-known exit code into the opener on finish (finalize).
+  if vim.b[buf].bsh_typst then
+    local meta = {
+      cmd = cmd,
+      host = remote and target or nil,
+      cwd = remote and nil or vim.fn.fnamemodify(doc_cwd(buf), ":~"),
+    }
+    local mark = fence.stage_cell(buf, trow, indent, meta,
+      remote and ("...running on " .. target .. "...") or "...running...")
+    run_job(buf, indent, mark, build_argv(target, cmd), cwd, transform, nil, nil, nil, nil,
+      function(code) fence.cell_recode(buf, mark, code) end)
     return
   end
   local mark = stage_fence(buf, trow, indent, "out",
