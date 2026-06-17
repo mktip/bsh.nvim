@@ -312,6 +312,50 @@ affordance, so you needn't pre-choose `%` vs `$`. Ties into the same machinery.
 (Relates to the parked ring-buffer/follow-log idea below — this *is* that, with
 the link pointing at a buffer rather than only a log.)
 
+## Interactivity (PTY / password prompts) — parked
+
+bsh runs cells via `jobstart` with **stdin closed** (commands see EOF), so
+anything that needs to prompt or hold a TTY can't work today. Two cases, handled
+differently:
+
+- **Password prompts (sudo/su/ssh/git)** — no full PTY needed. Provide an
+  **askpass shim**: bsh sets `SUDO_ASKPASS` / `SSH_ASKPASS` (+
+  `SSH_ASKPASS_REQUIRE=force`) / `GIT_ASKPASS` to a tiny helper that calls back
+  into nvim, prompts with `vim.fn.inputsecret()`, and echoes the secret on
+  stdout. Output still streams inline; only the secret is sidebarred. (Caveat:
+  `sudo` needs `-A`; ssh/git pick up the env var without flags. A `sudo` wrapper
+  on `$BSH_HOME`/PATH that adds `-A` could paper over that.)
+- **Genuinely interactive tools (REPLs, `fzf`, `vim`, `top`, `git rebase -i`)** —
+  need a real TTY. Escape-hatch marker **`$!`** ("shell, interactive", bang =
+  special, consistent with `:Bsh!` / `foo.bar!`): run the command in a **PTY**
+  via `termopen()`/`jobstart({pty=true})`, in a **floating terminal by default**
+  (user dislikes the nvim terminal split; float is least intrusive), configurable
+  to split or an external emulator (`$TERMINAL -e …`). The terminal is the
+  easiest path that genuinely works. Later: capture the PTY output back into the
+  cell's fence on exit (needs control-code stripping).
+
+## External display (images / GUI) — parked, no action
+
+GUI apps already work (`$ firefox` launches Firefox). Inline **images** /
+image-generating commands: park until Neovim has native image handling; then show
+in a **floating window** via a terminal graphics protocol (image.nvim /
+snacks.image). User explicitly wants to wait on an upstream nvim feature here.
+
+## Embedded LSP via otter.nvim — parked (worth exploring)
+
+Let code fences get real LSP (Python/Ruby/… inside the doc) by feeding
+[otter.nvim](https://github.com/jmbuhr/otter.nvim) the fenced code as synthetic
+per-language documents. **Known limitation to design around:** otter gives
+*static* analysis of fence *source*; it can't see `$$` / `python $$` **runtime**
+state — a variable created by *executing* an earlier cell lives in the live
+session process, not the text, so the LSP would flag it "undefined". That gap is
+inherent to static analysis, not a bug. Neat alignment to exploit: feed *all* of
+a buffer's `python $$` cells as **one** otter document, so statically-defined
+symbols carry across cells the same way the session accumulates them — otter's
+per-language concatenation ≈ the session's accumulated namespace. Probably out of
+scope for bsh proper (a user can add otter themselves), but bsh could expose the
+cell ranges/order to make it work well.
+
 ## Other roadmap bits (parked)
 
 - **Prompt loop** for the shell-first feel: run → drop a fresh `$$ ` prompt below
