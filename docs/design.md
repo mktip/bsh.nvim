@@ -276,54 +276,67 @@ Pick targets that show the namespace+listing model off, à la Xiki:
   changes), `git.wip`, `git.sync`. Great with the `bsh`-in-a-session cwd story.
 - Others that fit: `http.get <url>`, `json.*`, `notes.*`, `docker.*`.
 
-## Output to a side buffer (`%` long-runner / logs)
+## Output to a side buffer (a gesture, not a marker)
 
-Some output shouldn't live inline under the cell: long build logs, `tail -f`,
-anything you want to scroll/search separately. The cell should leave a compact
-**reference**, and the bytes should live in a **separate buffer** — which is the
-`%` long-runner finally made concrete.
+Some output shouldn't live inline under the cell: long build logs, `tail -f`, a
+dev server, anything you want to scroll/search separately. The cell should leave a
+compact **reference**, and the bytes should live in a **separate buffer**.
 
-Hard constraint the user named: the output buffer **does not necessarily exist on
-disk, and it's not always wise to persist it preemptively** (huge, infinite,
-sensitive, `/dev/random`). So the reference is a *handle that can become a path*,
-never a path by default.
+**Design pivot (2026-06-17): there is NO `%` marker.** `%` had been a stand-in for
+"async / long-running / buffered output", but:
 
-Model:
+- **async is already universal** — every cell runs via `jobstart` and streams, so
+  `%`-as-async would mark something every cell already is.
+- **where output goes (inline vs side buffer) is ORTHOGONAL** to run semantics — a
+  `$`, `$$`, `python`, namespace, or `:` cell could each want either. Orthogonal
+  properties belong in a **gesture**, not a marker (markers are for run *kind*).
+- **background/`&`** (fire-and-forget, drop output) mostly already works via
+  `$ cmd &` (the shell backgrounds it, child reparents to init); a dedicated `&`
+  marker would only add explicit detach — marginal, not built.
 
-- **`%` routes output to a side buffer** (`$` stays inline). The cell leaves an
-  owned **reference fence**, not content:
+So: output destination is a **second keybinding**, available on **every** cell:
+
+- `<CR>`  → output inline (today's behavior).
+- `<C-CR>` → run, but stream output into a **side buffer** (the long-runner /
+  log use case, for any command).
+- Portability: `<C-CR>` is only distinct from `<CR>` under the kitty keyboard
+  protocol (the user's `foot` qualifies); also bind a universal fallback
+  (`g<CR>` or a `<localleader>` map) for plain terminals / SSH.
+
+The side buffer (hard constraint the user named: it **does not necessarily exist
+on disk and must not be persisted preemptively** — huge / infinite / sensitive):
+
+- **Ephemeral + bounded:** a scratch `nofile` buffer `bsh://out/<doc>/<n>`, kept
+  as a **ring** (capped lines) so infinite streams can't OOM, with
+  follow/autoscroll and an easy **stop**.
+- **The cell shows a reference fence**, not content — an owned ` ```log ` fence
+  with a one-line live status:
 
   ```
-  % ./build.sh
+  $ ./build.sh
   ```log
   bsh://out/build.sh · 4213 lines · exit 0 · <CR> open · :w persist
   ```
   ```
 
-  The body is a one-line, live-updating status (line count, running/exit).
-- **The side buffer is ephemeral + bounded:** a scratch `nofile` buffer named
-  `bsh://out/<doc>/<n>` (not on disk), kept as a **ring** (capped lines) so
-  infinite streams can't OOM, with follow/autoscroll. `<CR>` on the reference
-  opens it in a split.
-- **Link = handle, not path:** rides the extmark we already anchor output with
-  (extmark id → bufnr map). Session-lived; reopen in a fresh nvim and it's gone —
-  acceptable for logs. (A short id token in the fence text can survive to show a
-  "(closed)" state.)
+- **Link = handle, not path:** rides the output extmark (extmark id → bufnr).
+  Session-lived; reopen in a fresh nvim and it's gone — fine for logs (the fence
+  can show "(closed)").
+- **Sticky routing via the `log` fence (the memory):** the ` ```log ` fence tag
+  *is* the per-cell memory — if a cell already owns a `log` fence, a plain `<CR>`
+  keeps routing to its buffer (a dev server you re-run keeps going to its buffer)
+  without touching the trigger line. Delete the fence to revert to inline. So
+  `<C-CR>` opts a cell in once; it stays in.
 - **Persist on demand only:** `:w` in the side buffer (or a keymap on the
-  reference) writes it to `$XDG_CACHE_HOME/bsh/…` and rewrites the fence to a real
-  `bsh:file:<path>` reference that survives reopen. Disk is opt-in — exactly the
-  "don't save preemptively" requirement.
-- **Idempotent re-run:** re-running the `%` cell clears the ring and reuses its
-  buffer.
-- **Lifecycle:** killing the doc or the cell stops the job (we already track
-  inflight jobs + BufWipeout → stop_session); wiping the side buffer stops it too.
+  reference) writes to `$XDG_CACHE_HOME/bsh/…` and rewrites the fence to a real
+  `bsh:file:<path>` that survives reopen. Disk is opt-in.
+- **Idempotent re-run:** clears the ring and reuses the buffer.
+- **Lifecycle:** killing the doc/cell stops the job (inflight jobs + BufWipeout →
+  stop_session already); wiping the side buffer stops it too.
 
-Optional later — **auto-spill threshold:** a plain `$` whose output exceeds N
-lines auto-collapses to the same reference fence with a "(N more lines) → open"
-affordance, so you needn't pre-choose `%` vs `$`. Ties into the same machinery.
-
-(Relates to the parked ring-buffer/follow-log idea below — this *is* that, with
-the link pointing at a buffer rather than only a log.)
+Optional later — **auto-spill threshold:** a plain inline `<CR>` whose output
+exceeds N lines auto-collapses to the same reference fence ("(N more lines) →
+open"), so you needn't pre-choose. Same machinery.
 
 ## Interactivity (PTY / password prompts) — parked
 
@@ -378,8 +391,9 @@ cells were given to it for context.
 - **Prompt loop** for the shell-first feel: run → drop a fresh `$$ ` prompt below
   in insert mode; plus Ctrl-C interrupt (we already track the job) and a
   pwd-aware prompt.
-- **`%` long-runner** → now specced above ("Output to a side buffer"): bounded
-  ring buffer + reference fence + persist-on-`:w`.
+- **Side-buffer output / long-runner** → specced above ("Output to a side
+  buffer"): a `<C-CR>` gesture (no `%` marker) → bounded ring buffer + reference
+  fence + sticky-via-`log`-fence + persist-on-`:w`.
 - **Interactive tree**: replace the `tree -F` text dump with a lazy,
   inline-expandable tree (folders expand/collapse in place, children listed on
   demand) — structure lives in indentation, no `tree` dependency, no upfront
