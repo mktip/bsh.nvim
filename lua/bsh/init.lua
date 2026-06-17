@@ -30,29 +30,9 @@ local fence_range, clear_inflight = fence.fence_range, fence.clear_inflight
 local stage_block, stage_fence, fill_fence = fence.stage_block, fence.stage_fence, fence.fill_fence
 M.foldexpr, M.foldtext = fence.foldexpr, fence.foldtext -- re-export (attach() uses require'bsh'.foldexpr)
 
--- Remote (`user@host$ cmd`) cells run in a login shell so the remote profile
--- and bashrc load (PATH, pkg, env). Set false for a bare, faster `ssh host cmd`
--- when the remote already has the env you need or you want zero startup files.
-M.remote_login = true
-
--- `> instruction` agent cells call `llm -t <template>`; the default `web`
--- template carries tools (search/fetch), so a `>` after a link can summarise it.
--- Point this at a more agentic template if you make one.
-M.agent_template = "web"
-
--- interpreter used for `python` cells (one-shot `python $` and session `python $$`).
-M.python = "python3"
-
--- language a `foo.bar!` define-in-place scaffolds a NEW leaf in: "sh" (a plain
--- shell command, lowest friction) or "python" (the dual-purpose command/`llm`
--- tool skeleton). Cosmetic extension only; dispatch stays shebang-driven.
-M.scaffold_lang = "sh"
-
--- Yes/no gate before `foo.bar!` creates a NEW file (so a stray `word!` line can't
--- silently scaffold). Overridable for customisation / tests; return true = go.
-M.confirm = function(prompt)
-  return vim.fn.confirm(prompt, "&Yes\n&No", 2) == 1
-end
+-- User options live in bsh.config; the engine reads `config.*`, and the public
+-- `require('bsh').<opt>` surface proxies to it (metatable at the bottom).
+local config = require("bsh.config")
 
 -- Build the argv to run a command string on `target`. Local (target == "")
 -- goes through the user's shell so pipes/globs/redirs work. Remote runs over ssh
@@ -65,7 +45,7 @@ end
 local function build_argv(target, cmd)
   if target == "" then
     return { vim.o.shell, vim.o.shellcmdflag, cmd }
-  elseif M.remote_login then
+  elseif config.remote_login then
     return { "ssh", "-T", target, "exec ${SHELL:-/bin/sh} -lc " .. vim.fn.shellescape(cmd) }
   else
     return { "ssh", "-T", target, cmd }
@@ -328,7 +308,7 @@ local SPECS = {
     end,
   },
   python = {
-    argv = function(token, _) return { M.python, "-u", "-c", (DRIVER_PY:gsub("@TOKEN@", token)) } end,
+    argv = function(token, _) return { config.python, "-u", "-c", (DRIVER_PY:gsub("@TOKEN@", token)) } end,
     init = function() end,
     send = function(s, code) -- length-prefixed chunk: header line + exact bytes
       vim.fn.chansend(s.job, tostring(#code) .. "\n" .. code)
@@ -666,7 +646,7 @@ local function run_agent(buf, trow, indent, instruction, ncontext)
   end
   local mark = stage_fence(buf, trow, indent, "agent", "...thinking...")
   run_job(buf, indent, mark,
-    { "llm", "-t", M.agent_template, "--chain-limit", "15", prompt },
+    { "llm", "-t", config.agent_template, "--chain-limit", "15", prompt },
     doc_cwd(buf), agent_transform, agent_sanitize) -- sanitize the live preview too
 end
 
@@ -833,7 +813,7 @@ local SCAFFOLD = {
 -- parent dirs; fills the template; sets the exec bit so it's runnable at once.
 local function scaffold_leaf(dotted, path)
   local fname = (dotted:gsub(".*%.", "")):gsub("[^%w_]", "_")
-  local spec = SCAFFOLD[M.scaffold_lang] or SCAFFOLD.sh
+  local spec = SCAFFOLD[config.scaffold_lang] or SCAFFOLD.sh
   local body = (spec.body:gsub("@N@", dotted):gsub("@F@", fname))
   vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
   vim.fn.writefile(vim.split(body, "\n"), path)
@@ -856,12 +836,12 @@ local function edit_namespace(dotted)
     local enter = base .. "/.enter"
     path = vim.fn.filereadable(enter) == 1 and enter or nil
     if not path then -- offer to define this folder's `.enter`
-      if not M.confirm("bsh: define " .. dotted .. "/.enter ?") then return true end
+      if not config.confirm("bsh: define " .. dotted .. "/.enter ?") then return true end
       path = scaffold_leaf(dotted, enter)
     end
   elseif not path then -- nothing there: scaffold a new leaf (with a typo-guard)
-    if not M.confirm("bsh: create command '" .. dotted .. "' ?") then return true end
-    path = scaffold_leaf(dotted, base .. (SCAFFOLD[M.scaffold_lang] or SCAFFOLD.sh).ext)
+    if not config.confirm("bsh: create command '" .. dotted .. "' ?") then return true end
+    path = scaffold_leaf(dotted, base .. (SCAFFOLD[config.scaffold_lang] or SCAFFOLD.sh).ext)
   end
 
   vim.cmd("split " .. vim.fn.fnameescape(path))
@@ -898,7 +878,7 @@ local function execute_cell(to_buf)
     elseif fc.session then
       run_session(buf, fc.lang, "", fc.close, fc.indent, fc.body, to_buf)
     else -- one-shot interpreter run
-      run_oneshot(buf, fc.close, fc.indent, { M.python, "-c", fc.body }, to_buf)
+      run_oneshot(buf, fc.close, fc.indent, { config.python, "-c", fc.body }, to_buf)
     end
     return true
   end
@@ -1107,5 +1087,17 @@ M.config = function()
     end
   end, { bang = true, desc = "open a scratch bsh buffer (! = attach to current)" })
 end
+
+-- Public option surface: `require('bsh').python`, `…remote_login`, etc. proxy to
+-- bsh.config so reads and writes hit the single source of truth the engine reads.
+-- Set last, after all M.<fn> fields exist, so it only governs the option keys.
+setmetatable(M, {
+  __index = function(_, k)
+    if config[k] ~= nil then return config[k] end
+  end,
+  __newindex = function(t, k, v)
+    if config[k] ~= nil then config[k] = v else rawset(t, k, v) end
+  end,
+})
 
 return M

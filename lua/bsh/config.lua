@@ -1,0 +1,30 @@
+-- User-tunable options: the single source of truth read by the engine modules.
+-- The public surface `require('bsh').<opt>` proxies here (see init.lua), so
+-- `require('bsh').python = 'python3.12'` and reads keep working.
+local M = {}
+
+-- Remote (`user@host$ cmd`) cells run in a login shell so the remote profile
+-- and bashrc load (PATH, pkg, env). Set false for a bare, faster `ssh host cmd`
+-- when the remote already has the env you need or you want zero startup files.
+M.remote_login = true
+
+-- `> instruction` agent cells call `llm -t <template>`; the default `web`
+-- template carries tools (search/fetch), so a `>` after a link can summarise it.
+-- Point this at a more agentic template if you make one.
+M.agent_template = "web"
+
+-- interpreter used for `python` cells (one-shot `python $` and session `python $$`).
+M.python = "python3"
+
+-- language a `foo.bar!` define-in-place scaffolds a NEW leaf in: "sh" (a plain
+-- shell command, lowest friction) or "python" (the dual-purpose command/`llm`
+-- tool skeleton). Cosmetic extension only; dispatch stays shebang-driven.
+M.scaffold_lang = "sh"
+
+-- Yes/no gate before `foo.bar!` creates a NEW file (so a stray `word!` line can't
+-- silently scaffold). Overridable for customisation / tests; return true = go.
+function M.confirm(prompt)
+  return vim.fn.confirm(prompt, "&Yes\n&No", 2) == 1
+end
+
+return M
