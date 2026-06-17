@@ -322,6 +322,52 @@ opening delimiter on exit (inline only), so `` ```out `` flips to `` ```menu ``.
 (`bsh.fence`). Demo fixture: `examples/bsh-home/demo/menu.sh`. Tests: the two menu
 cases in `tests/test_namespace.lua`.
 
+## Targets are routes; transports are user-definable — BUILT (2026-06-18, slice 1)
+
+The target (the bit before `$`/`:`) generalised from "empty | `user@host`" into a
+**route**: `scheme@addr` hops chained with `/`, read **left = innermost**.
+
+```
+docker@api               # local container
+docker@api/web@prod      # that container, reached over ssh on prod  (docker ∘ ssh)
+web@prod                 # plain ssh (unchanged: `web` isn't a transport scheme)
+```
+
+The same route feeds **both** verbs (`:` lists a dir at the route's end, `$` runs
+there) — the verbs stay distinct, the *locator* is shared. That's the real content
+of the earlier "`:` merged with `$`?" question: merge the route, not the verbs.
+
+**Transports are user-definable; the engine hardcodes only ssh.** This is the
+namespace philosophy (no registry, you own the definitions) applied to *getting
+there*. `config.transports` maps a scheme to an argv **template** with two holes:
+- `{addr}` — substituted literally (a host/container/jail id, or a fragment).
+- `{cmd}` — the inner command: **raw** when it's the whole element (a direct
+  `sh -lc {cmd}` argv slot, nothing re-parses it), **shell-escaped** when embedded
+  in a bigger word (a shell on the far side, e.g. ssh's remote shell, re-parses).
+A value may instead be a `function(addr, inner) -> argv` (the escape hatch). ssh
+is built in and honours `remote_login`; `docker` ships as the worked example;
+jail/podman/kube/vm are one-liners the user adds. Scheme set = table keys; an
+unregistered scheme → plain ssh destination (so `user@host`/`host` are untouched).
+
+**Nesting is a fold, not a special case** (`build_argv` in `bsh.job`): process
+hops innermost→outermost; each inner hop's argv is `shelljoin`'d (each word quoted)
+into a command string that becomes the next hop's `{cmd}`; the outermost hop yields
+the final argv. Escaping therefore nests correctly for free — jail-in-VM,
+container-in-jail all compose. Because listings and one-shots both go through
+`build_argv`, this slice lit them up for *all* transports at once.
+
+Tests: `tests/test_route.lua` asserts the **compiled argv** (pure function of
+target + config) for local / ssh / `remote_login=false` / docker / unregistered
+scheme / user transport / function transport / docker-over-ssh nesting — so they
+need no ssh/docker/jail present.
+
+**Not yet (next slices):** sessions over transports (`docker@api$$` as a persistent
+container shell), the `pwd`-in-sentinel **cwd prompt** for sessions (the only
+reliable cwd signal — read the shell, never parse `cd`), and a `docker.list`
+namespace command that drills a container id into a `docker@id$$` session cell
+(ties the route grammar to the menu model). VM **consoles** (PTY) stay with the
+parked interactivity work; the ssh-style `vm` template covers the exec case now.
+
 ## Output to a side buffer (a gesture, not a marker) — BUILT (2026-06-17)
 
 **Built:** `<C-CR>` / `g<CR>` runs a cell with output into a side buffer instead of

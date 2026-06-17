@@ -8,6 +8,22 @@ local M = {}
 -- when the remote already has the env you need or you want zero startup files.
 M.remote_login = true
 
+-- Transports: how a `scheme@addr` hop reaches a shell. The directory tree of the
+-- engine hardcodes nothing but ssh -- everything else (containers, jails, VMs) is
+-- yours to define here, one line each. A value is an argv TEMPLATE with two holes:
+--   {addr} -- the container/jail/host id (always substituted literally)
+--   {cmd}  -- the inner command; passed raw when it's the whole element (a direct
+--             `sh -lc {cmd}` slot), shell-escaped when embedded in a bigger word.
+-- Or a function(addr, inner) -> argv for full control. The scheme name is the key.
+-- ssh is built in (and honours remote_login); add to / override this table freely.
+-- Examples to copy:  jail = { "jexec", "{addr}", "sh", "-lc", "{cmd}" }
+--                    podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" }
+--                    kube = { "kubectl", "exec", "-i", "{addr}", "--", "sh", "-lc", "{cmd}" }
+--                    vm = { "ssh", "-T", "{addr}.vm.lan", "{cmd}" }   -- a bhyve/kvm guest
+M.transports = {
+  docker = { "docker", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
+}
+
 -- `> instruction` agent cells call `llm -t <template>`; the default `web`
 -- template carries tools (search/fetch), so a `>` after a link can summarise it.
 -- Point this at a more agentic template if you make one.

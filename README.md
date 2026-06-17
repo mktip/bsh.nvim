@@ -30,6 +30,7 @@ session, no marker is inert (so plain code blocks stay dead).
 | `$ cmd` | one-shot shell command → `out` fence |
 | `$$ cmd` | persistent shell — `export`/`cd`/venv carry across cells |
 | `user@host$ cmd` | run over `ssh` (one-shot or `$$` session) |
+| `docker@id$ cmd` | run inside a container (any transport — see below) |
 | ` ```$$ … ``` ` | multiline block, `<CR>` anywhere inside runs it all |
 | ` ```python $ ` / ` ```python $$ ` | Python, one-shot or a stateful session |
 | `: path` | navigable directory listing (`<CR>` drills in / opens files) |
@@ -67,6 +68,35 @@ thing `<CR>` runs *and* a tool registered for the `llm` CLI. See
 ```sh
 export BSH_HOME="$HOME/pockt/bsh"
 ```
+
+### Targets are routes (ssh, containers, jails, VMs — composable)
+
+The bit before `$`/`:` is a **route**: `scheme@addr` hops chained with `/`, read
+left = innermost. The same route drives both verbs — `:` lists, `$` runs:
+
+```
+docker@api $ ps aux            # exec inside a local container
+docker@api : /var/log          # …list a dir inside it
+docker@api/web@prod $ ps aux   # that container, reached over ssh on `prod`
+web@prod $ uname -a            # plain ssh (unchanged)
+```
+
+The engine hardcodes only **ssh**; every other transport is a one-line entry in
+`require('bsh').transports` — an argv template with `{addr}` and `{cmd}` holes (or
+a `function(addr, inner)` for full control). So containers, FreeBSD jails, bhyve/
+kvm guests are *your* definitions, not the plugin's:
+
+```lua
+require('bsh').transports.jail   = { "jexec", "{addr}", "sh", "-lc", "{cmd}" }
+require('bsh').transports.podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" }
+require('bsh').transports.kube   = { "kubectl", "exec", "-i", "{addr}", "--", "sh", "-lc", "{cmd}" }
+require('bsh').transports.vm     = { "ssh", "-T", "{addr}.vm.lan", "{cmd}" }  -- a guest you ssh to
+-- docker ships as the worked example. Nesting (jail-in-VM, container-in-jail) just
+-- composes: each hop wraps and escapes the one inside it.
+```
+
+A scheme is recognised iff it's a key in that table; anything else (`user@host`,
+bare `host`) is a plain ssh destination, so existing cells are untouched.
 
 **Drillable menus.** A namespace command can *declare* its output a self-feeding
 menu by **exiting `150`** (bsh's `menu_exit`). bsh then renders it as a `` ```menu ``

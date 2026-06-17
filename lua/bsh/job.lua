@@ -9,21 +9,82 @@ local config = require("bsh.config")
 local ns, inflight = fence.ns, fence.inflight
 local stage_fence = fence.stage_fence
 
--- Build the argv to run a command string on `target`. Local (target == "")
--- goes through the user's shell so pipes/globs/redirs work. Remote runs over ssh
--- in a *login* shell (so the remote profile/bashrc -- and thus PATH, pkg, env --
--- load; a bare `ssh host cmd` sources none of that).
---   -T: no pseudo-tty (we capture non-interactively); stdin is closed by the
---   caller, so auth must be non-interactive (ssh-agent/keys).
---   ssh re-joins its trailing args with spaces and the REMOTE shell re-parses
---   the result, so `cmd` must be shell-quoted or it would word-split remotely.
+-- ───────────────────────────── targets as routes ────────────────────────────
+-- A target is a ROUTE: `scheme@addr` hops chained with `/`, read left = INNERMOST
+-- (`docker@api/web@prod` = container `api`, reached *on* host `prod`). Each hop's
+-- transport is a small argv TEMPLATE (config.transports), so reaching into a
+-- container/jail/VM is user-definable -- the engine hardcodes nothing but ssh.
+--   `web@prod`        -> ssh (scheme `web` isn't a transport -> whole seg is the
+--                        ssh destination; back-compatible with the old behaviour)
+--   `docker@api`      -> config.transports.docker template, addr `api`
+--   `docker@api/web@prod` -> docker hop wrapped by an ssh hop
+-- ssh runs a *login* shell so the remote profile loads (PATH/env); -T = no pty
+-- (we capture non-interactively, stdin closed -> auth must be non-interactive).
+
+-- The built-in ssh hop (depends on remote_login). `{cmd}` is embedded in a word
+-- the REMOTE shell re-parses, so it gets shell-escaped (see subst).
+local function ssh_template()
+  if config.remote_login then
+    return { "ssh", "-T", "{addr}", "exec ${SHELL:-/bin/sh} -lc {cmd}" }
+  end
+  return { "ssh", "-T", "{addr}", "{cmd}" }
+end
+
+-- Substitute one template element. `{addr}` is always literal (a hostname/id, or
+-- a fragment of one; any later shell crossing is handled by shelljoin). `{cmd}`
+-- is the inner command: passed RAW when it IS the whole element (a direct argv
+-- slot -- `sh -lc {cmd}` -- nothing re-parses it), shell-ESCAPED when embedded in
+-- a larger word (a shell on the far side, e.g. ssh's remote shell, re-parses it).
+local function subst(elem, addr, inner)
+  if elem == "{cmd}" then return inner end
+  elem = elem:gsub("{addr}", function() return addr end)
+  elem = elem:gsub("{cmd}", function() return vim.fn.shellescape(inner) end)
+  return elem
+end
+
+-- Resolve a segment to its (template, addr). A registered transport scheme wins;
+-- `ssh@…` is an explicit escape hatch; anything else is a plain ssh destination
+-- (so `user@host` and bare `host` stay ssh, with the whole segment as the addr).
+local function resolve_hop(seg)
+  local scheme, addr = seg:match("^([%w_][%w_%-]*)@(.+)$")
+  if scheme then
+    local t = config.transports[scheme]
+    if t then return t, addr end
+    if scheme == "ssh" then return ssh_template(), addr end
+  end
+  return ssh_template(), seg
+end
+
+-- Render an argv as a single shell-command string (each word quoted), so an inner
+-- hop's argv can be embedded as the `{cmd}` of the next hop out.
+local function shelljoin(argv)
+  local parts = {}
+  for _, a in ipairs(argv) do parts[#parts + 1] = vim.fn.shellescape(a) end
+  return table.concat(parts, " ")
+end
+
+-- Build one hop's argv that runs `inner` (a command string) at `addr`. A template
+-- is an argv list with {addr}/{cmd}, or a function(addr, inner) -> argv for full
+-- control (the escape hatch for anything a template can't express).
+local function hop_argv(tmpl, addr, inner)
+  if type(tmpl) == "function" then return tmpl(addr, inner) end
+  local out = {}
+  for _, e in ipairs(tmpl) do out[#out + 1] = subst(e, addr, inner) end
+  return out
+end
+
+-- Compile a route + command into the argv jobstart runs. Fold the hops from
+-- innermost outward: each inner hop's argv becomes a shell-quoted command string
+-- fed as the next hop's `{cmd}`; the outermost hop yields the final argv.
 local function build_argv(target, cmd)
-  if target == "" then
-    return { vim.o.shell, vim.o.shellcmdflag, cmd }
-  elseif config.remote_login then
-    return { "ssh", "-T", target, "exec ${SHELL:-/bin/sh} -lc " .. vim.fn.shellescape(cmd) }
-  else
-    return { "ssh", "-T", target, cmd }
+  if target == "" then return { vim.o.shell, vim.o.shellcmdflag, cmd } end
+  local segs = vim.split(target, "/", { plain = true })
+  local inner = cmd
+  for i = 1, #segs do
+    local tmpl, addr = resolve_hop(segs[i])
+    local argv = hop_argv(tmpl, addr, inner)
+    if i == #segs then return argv end
+    inner = shelljoin(argv)
   end
 end
 
