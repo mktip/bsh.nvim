@@ -72,12 +72,13 @@ export BSH_HOME="$HOME/pockt/bsh"
 ### Targets are routes (ssh, containers, jails, VMs — composable)
 
 The bit before `$`/`:` is a **route**: `scheme@addr` hops chained with `/`, read
-left = innermost. The same route drives both verbs — `:` lists, `$` runs:
+left = outermost (outside-in, big → small). The same route drives both verbs —
+`:` lists, `$` runs:
 
 ```
 docker@api $ ps aux            # exec inside a local container
 docker@api : /var/log          # …list a dir inside it
-docker@api/web@prod $ ps aux   # that container, reached over ssh on `prod`
+web@prod/docker@api $ ps aux   # ssh to `prod`, then into container `api`
 web@prod $ uname -a            # plain ssh (unchanged)
 ```
 

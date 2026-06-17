@@ -10,14 +10,15 @@ local ns, inflight = fence.ns, fence.inflight
 local stage_fence = fence.stage_fence
 
 -- ───────────────────────────── targets as routes ────────────────────────────
--- A target is a ROUTE: `scheme@addr` hops chained with `/`, read left = INNERMOST
--- (`docker@api/web@prod` = container `api`, reached *on* host `prod`). Each hop's
--- transport is a small argv TEMPLATE (config.transports), so reaching into a
--- container/jail/VM is user-definable -- the engine hardcodes nothing but ssh.
+-- A target is a ROUTE: `scheme@addr` hops chained with `/`, read left = OUTERMOST
+-- (outside-in, big -> small: `web@prod/docker@api` = host `prod`, then *into*
+-- container `api`). Each hop's transport is a small argv TEMPLATE
+-- (config.transports), so reaching into a container/jail/VM is user-definable --
+-- the engine hardcodes nothing but ssh.
 --   `web@prod`        -> ssh (scheme `web` isn't a transport -> whole seg is the
 --                        ssh destination; back-compatible with the old behaviour)
 --   `docker@api`      -> config.transports.docker template, addr `api`
---   `docker@api/web@prod` -> docker hop wrapped by an ssh hop
+--   `web@prod/docker@api` -> ssh hop (outer) wrapping a docker hop (inner)
 -- ssh runs a *login* shell so the remote profile loads (PATH/env); -T = no pty
 -- (we capture non-interactively, stdin closed -> auth must be non-interactive).
 
@@ -73,17 +74,18 @@ local function hop_argv(tmpl, addr, inner)
   return out
 end
 
--- Compile a route + command into the argv jobstart runs. Fold the hops from
--- innermost outward: each inner hop's argv becomes a shell-quoted command string
--- fed as the next hop's `{cmd}`; the outermost hop yields the final argv.
+-- Compile a route + command into the argv jobstart runs. Hops read left =
+-- outermost, so fold from the RIGHT: the rightmost (innermost) hop runs `cmd`;
+-- each hop's argv becomes a shell-quoted command string fed as the next hop OUT's
+-- `{cmd}`; the leftmost (outermost) hop yields the final argv.
 local function build_argv(target, cmd)
   if target == "" then return { vim.o.shell, vim.o.shellcmdflag, cmd } end
   local segs = vim.split(target, "/", { plain = true })
   local inner = cmd
-  for i = 1, #segs do
+  for i = #segs, 1, -1 do
     local tmpl, addr = resolve_hop(segs[i])
     local argv = hop_argv(tmpl, addr, inner)
-    if i == #segs then return argv end
+    if i == 1 then return argv end
     inner = shelljoin(argv)
   end
 end

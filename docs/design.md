@@ -325,11 +325,12 @@ cases in `tests/test_namespace.lua`.
 ## Targets are routes; transports are user-definable — BUILT (2026-06-18, slice 1)
 
 The target (the bit before `$`/`:`) generalised from "empty | `user@host`" into a
-**route**: `scheme@addr` hops chained with `/`, read **left = innermost**.
+**route**: `scheme@addr` hops chained with `/`, read **left = outermost**
+(outside-in, big → small — host, then into the thing on it):
 
 ```
 docker@api               # local container
-docker@api/web@prod      # that container, reached over ssh on prod  (docker ∘ ssh)
+web@prod/docker@api      # ssh to prod, then into container api  (ssh ∘ docker)
 web@prod                 # plain ssh (unchanged: `web` isn't a transport scheme)
 ```
 
@@ -349,10 +350,11 @@ is built in and honours `remote_login`; `docker` ships as the worked example;
 jail/podman/kube/vm are one-liners the user adds. Scheme set = table keys; an
 unregistered scheme → plain ssh destination (so `user@host`/`host` are untouched).
 
-**Nesting is a fold, not a special case** (`build_argv` in `bsh.job`): process
-hops innermost→outermost; each inner hop's argv is `shelljoin`'d (each word quoted)
-into a command string that becomes the next hop's `{cmd}`; the outermost hop yields
-the final argv. Escaping therefore nests correctly for free — jail-in-VM,
+**Nesting is a fold, not a special case** (`build_argv` in `bsh.job`): hops read
+left = outermost, so fold from the RIGHT — the innermost (rightmost) hop runs the
+command, each hop's argv is `shelljoin`'d (each word quoted) into a string that
+becomes the next hop OUT's `{cmd}`, and the outermost (leftmost) hop yields the
+final argv. Escaping therefore nests correctly for free — jail-in-VM,
 container-in-jail all compose. Because listings and one-shots both go through
 `build_argv`, this slice lit them up for *all* transports at once.
 
