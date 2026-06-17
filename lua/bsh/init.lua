@@ -255,6 +255,17 @@ local function buffer_sink(buf, mark, indent, sidebuf, link)
   end
 end
 
+-- Set up a side-buffer run for the cell at `trow`: reuse/mint the buffer (via
+-- `link`, if the cell already owns a `log` fence), clear it, stage the `log`
+-- reference fence, and return (mark, sink). Every run path's <C-CR> branch uses
+-- this, so the inline-vs-buffer fork stays a one-liner in each.
+local function begin_buffer_run(buf, trow, indent, link)
+  local sidebuf, name = ensure_out_buffer(link)
+  vim.api.nvim_buf_set_lines(sidebuf, 0, -1, false, {}) -- clear for a fresh stream
+  local mark = stage_fence(buf, trow, indent, "log", name .. "  ·  running…  ·  <CR> open")
+  return mark, buffer_sink(buf, mark, indent, sidebuf, name)
+end
+
 -- Open a cell's output buffer (from its `bsh://out/…` link) in a split.
 local function open_out_buffer(name)
   local b = out_bufs[name]
@@ -311,11 +322,8 @@ local function run_shell(buf, trow, indent, target, cmd, to_buf)
   local remote = target ~= ""
   local cwd = remote and nil or doc_cwd(buf)
   if to_buf then
-    local sidebuf, name = ensure_out_buffer(link)
-    vim.api.nvim_buf_set_lines(sidebuf, 0, -1, false, {}) -- clear for a fresh stream
-    local mark = stage_fence(buf, trow, indent, "log", name .. "  ·  starting…  ·  <CR> open")
-    run_job(buf, indent, mark, build_argv(target, cmd), cwd, shell_transform, nil,
-      buffer_sink(buf, mark, indent, sidebuf, name))
+    local mark, sink = begin_buffer_run(buf, trow, indent, link)
+    run_job(buf, indent, mark, build_argv(target, cmd), cwd, shell_transform, nil, sink)
     return
   end
   local mark = stage_fence(buf, trow, indent, "out",
@@ -432,7 +440,13 @@ local function sess_start(buf, lang, target)
           local lines = vim.split(body:gsub("\r", ""), "\n", { plain = true })
           while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
           if tonumber(rc) ~= 0 then lines[#lines + 1] = "[exit " .. rc .. "]" end
-          fill_fence(buf, item.mark, item.indent, lines)
+          if item.sink then -- <C-CR>: output to a side buffer, not the doc fence
+            item.sink(lines, true, tonumber(rc))
+            pcall(vim.api.nvim_buf_del_extmark, buf, ns, item.mark)
+            if inflight[buf] then inflight[buf][item.mark] = nil end
+          else
+            fill_fence(buf, item.mark, item.indent, lines)
+          end
         end
         sess_pump(buf, key) -- drain anything queued behind it
       end
@@ -447,8 +461,13 @@ local function sess_start(buf, lang, target)
   return s
 end
 
--- Queue `cmd` on this buffer's `lang`@`target` session, staging an `out` fence.
-local function run_session(buf, lang, target, trow, indent, cmd)
+-- Queue `cmd` on this buffer's `lang`@`target` session. Output lands inline in an
+-- `out` fence; with `to_buf` (<C-CR>) -- or sticky, if the cell already owns a
+-- `log` fence -- in a side buffer, exactly like `$`. A `$$` fence is pure output
+-- (nothing to navigate inside it), so the only difference from `$` is that the
+-- session fills once on unit completion rather than streaming, so we hand the
+-- buffer sink to the queue item and the pump calls it instead of `fill_fence`.
+local function run_session(buf, lang, target, trow, indent, cmd, to_buf)
   local key = skey(lang, target)
   if not (sessions[buf] and sessions[buf][key]) then
     if not sess_start(buf, lang, target) then
@@ -456,14 +475,31 @@ local function run_session(buf, lang, target, trow, indent, cmd)
       return
     end
   end
-  local mark = stage_fence(buf, trow, indent, "out", "...running (session)...")
-  table.insert(sessions[buf][key].queue, { cmd = cmd, mark = mark, indent = indent })
+  local link = existing_log_link(buf, trow)
+  if link then to_buf = true end -- sticky: keep an opted-in cell on its buffer
+  local item
+  if to_buf then
+    local mark, sink = begin_buffer_run(buf, trow, indent, link)
+    item = { cmd = cmd, mark = mark, indent = indent, sink = sink }
+  else
+    local mark = stage_fence(buf, trow, indent, "out", "...running (session)...")
+    item = { cmd = cmd, mark = mark, indent = indent }
+  end
+  table.insert(sessions[buf][key].queue, item)
   sess_pump(buf, key)
 end
 
--- A one-shot (`$`) run of an explicit argv into an `out` fence (used for non-shell
--- one-shots like `python $`; shell one-shots go through run_shell/build_argv).
-local function run_oneshot(buf, trow, indent, argv)
+-- A one-shot (`$`) run of an explicit argv (used for non-shell one-shots like
+-- `python $`; shell one-shots go through run_shell/build_argv). Inline by default;
+-- `to_buf` (<C-CR>, or sticky) routes it to a side buffer like everything else.
+local function run_oneshot(buf, trow, indent, argv, to_buf)
+  local link = existing_log_link(buf, trow)
+  if link then to_buf = true end
+  if to_buf then
+    local mark, sink = begin_buffer_run(buf, trow, indent, link)
+    run_job(buf, indent, mark, argv, doc_cwd(buf), shell_transform, nil, sink)
+    return
+  end
   local mark = stage_fence(buf, trow, indent, "out", "...running...")
   run_job(buf, indent, mark, argv, doc_cwd(buf), shell_transform)
 end
@@ -984,7 +1020,7 @@ local function execute_cell(to_buf)
   if fc then
     if fc.lang == "sh" then
       if fc.session then -- local or remote (`user@host$$`) persistent shell
-        run_session(buf, "sh", fc.target, fc.close, fc.indent, fc.body)
+        run_session(buf, "sh", fc.target, fc.close, fc.indent, fc.body, to_buf)
       else
         run_shell(buf, fc.close, fc.indent, fc.target, fc.body, to_buf)
       end
@@ -992,9 +1028,9 @@ local function execute_cell(to_buf)
       vim.notify("bsh: remote " .. fc.lang .. " cells aren't supported yet",
         vim.log.levels.WARN)
     elseif fc.session then
-      run_session(buf, fc.lang, "", fc.close, fc.indent, fc.body)
+      run_session(buf, fc.lang, "", fc.close, fc.indent, fc.body, to_buf)
     else -- one-shot interpreter run
-      run_oneshot(buf, fc.close, fc.indent, { M.python, "-c", fc.body })
+      run_oneshot(buf, fc.close, fc.indent, { M.python, "-c", fc.body }, to_buf)
     end
     return true
   end
@@ -1006,7 +1042,7 @@ local function execute_cell(to_buf)
   local stgt, sdbl, scmd = line:match("^%s*(%S-)(%$%$?)%s+(.+)$")
   if scmd then
     if sdbl == "$$" then
-      run_session(buf, "sh", stgt, trow, indent, scmd)
+      run_session(buf, "sh", stgt, trow, indent, scmd, to_buf)
     else
       run_shell(buf, trow, indent, stgt, scmd, to_buf)
     end

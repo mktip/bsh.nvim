@@ -276,20 +276,29 @@ Pick targets that show the namespace+listing model off, à la Xiki:
   changes), `git.wip`, `git.sync`. Great with the `bsh`-in-a-session cwd story.
 - Others that fit: `http.get <url>`, `json.*`, `notes.*`, `docker.*`.
 
-## Output to a side buffer (a gesture, not a marker) — BUILT v1 (2026-06-17)
+## Output to a side buffer (a gesture, not a marker) — BUILT (2026-06-17)
 
-**Built (v1):** `<C-CR>` / `g<CR>` runs `$` and namespace cells with output into a
-side buffer (`run_shell`'s `to_buf` path). The buffer is an unbounded `nofile`
-scratch named `bsh://out/<doc>/<n>`; that name is written into an owned ` ```log `
-reference fence and IS the durable link; `out_bufs` caches name→bufnr.
-`buffer_sink` streams stdout in (follow/autoscroll) and keeps the reference line's
-status (`<link> · N lines · running…/exit C · <CR> open`). Re-run reuses the
-linked buffer (only `ensure_out_buffer` mints a new one when there's no live
-link); a cell that owns a `log` fence is sticky on a plain `<CR>` too; `<CR>` on
-the reference line opens the buffer (`open_out_buffer`). `log` is in `OWNED_TAGS`
-so re-runs replace the fence. **Not yet:** `$$`/`python $$` sessions and `:`
-listings still go inline; persist-on-`:w` to a real `bsh:file:` path; an explicit
-stop keymap (re-run already restarts; `M.stop_session` on wipe).
+**Built:** `<C-CR>` / `g<CR>` runs a cell with output into a side buffer instead of
+inline, across **every output cell type**: `$`, `$$` shell session, `python $`
+one-shot, `python $$` session, and namespace cells. The buffer is an unbounded
+`nofile` scratch named `bsh://out/<doc>/<n>`; that name is written into an owned
+` ```log ` reference fence and IS the durable link; `out_bufs` caches name→bufnr.
+`buffer_sink` writes output in (follow/autoscroll) and keeps the reference line's
+status (`<link> · N lines · running…/exit C · <CR> open`). One helper
+`begin_buffer_run` (reuse/mint buffer + clear + stage `log` fence + sink) is the
+single fork in each run path; `run_job` takes the sink for streamed cells, and the
+session pump hands the sink to its queue item and calls it instead of `fill_fence`
+(a `$$` fence is pure output, so it's the same as `$` — it just fills on unit
+completion rather than streaming). Re-run reuses the linked buffer (only
+`ensure_out_buffer` mints a new one when there's no live link); a cell that owns a
+`log` fence is sticky on a plain `<CR>` too; `<CR>` on the reference line opens the
+buffer (`open_out_buffer`). `log` is in `OWNED_TAGS` so re-runs replace the fence.
+
+**Deliberately NOT routed:** `:` listings — their output IS interactive (in-fence
+drill/open), so it must stay in the doc fence. **Not yet:** persist-on-`:w` to a
+real `bsh:file:` path; an explicit stop keymap (re-run already restarts;
+`M.stop_session` on wipe); live streaming for `$$` sessions (they fill on unit
+completion, pre-existing).
 
 Original rationale + spec below.
 
