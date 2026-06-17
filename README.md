@@ -68,6 +68,18 @@ thing `<CR>` runs *and* a tool registered for the `llm` CLI. See
 export BSH_HOME="$HOME/pockt/bsh"
 ```
 
+**Drillable menus.** A namespace command's output is a self-feeding menu:
+**`<C-CR>`** (or `g<CR>`) on an output line appends that line — as one quoted
+argument — to the trigger and re-runs it *in place*. So a `docker.list` that
+prints container ids becomes navigable: `<C-CR>` an id → `docker.list <id>`,
+which the script reinterprets as "drill into this one" and prints its actions;
+`<C-CR>` an action drills further. The trigger accumulates a breadcrumb
+(`docker.list <id> start`) you can edit or backspace to walk back up. It's on
+`<C-CR>` (not plain `<CR>`) because output is noisy — a stray `<CR>` shouldn't
+re-fire the command (plain `<CR>` still drives `dir`/`tree` listing nav, which is
+clean entry-per-line). See `examples/bsh-home/demo/menu.sh` for the ~6-line shape
+a menu command takes.
+
 ## Install
 
 Requires Neovim 0.9+. Python cells need `python3`; agent cells need

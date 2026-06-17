@@ -276,6 +276,43 @@ Pick targets that show the namespace+listing model off, à la Xiki:
   changes), `git.wip`, `git.sync`. Great with the `bsh`-in-a-session cwd story.
 - Others that fit: `http.get <url>`, `json.*`, `notes.*`, `docker.*`.
 
+## Self-feeding menus (output line → next arg) — BUILT (2026-06-17)
+
+The drill idea above (`docker.list` → click a row → its actions) generalised into
+one rule, with **zero engine knowledge of any command**:
+
+> A namespace command's `out` fence is a menu. **`<C-CR>`** on a body line appends
+> that line — trimmed, as one shell-escaped argument — to the trigger and re-runs
+> it **in place**. The command inspects `"$@"` to decide list-vs-drill.
+
+So `docker.list` is ~6 lines of bash (`case $# in 0) list;; 1) actions for $1;; *)
+act $2 on $1;; esac`). Each `<C-CR>` rewrites the trigger into a visible,
+editable **breadcrumb** (`docker.list <id> start`); backspacing an arg walks back
+up. This is the same oil-style trigger-rewrite already used for `dir` drilling,
+now applied to arbitrary command output — a zipper over a command tree.
+
+Decisions that shaped it (all settled with the user):
+- **Default for all namespace output**, no opt-in marker from the command. The
+  signal that an `out` fence is a menu is just that its trigger is a dotted name
+  that *resolves* under `$BSH_HOME` (`namespace.resolves`); `$`/`:`/url output
+  stays inert, so plain shell output isn't accidentally drillable.
+- **Append the whole clicked line as one quoted arg** (`$1` = the line), not the
+  first token — the command author designs the menu and parses as it likes; most
+  power to the script, no engine magic.
+- **`<C-CR>`, not plain `<CR>`** — output is noisy; a stray `<CR>` must not
+  re-fire the command with a garbage arg. `dir`/`tree` listings (clean
+  entry-per-line) keep their plain-`<CR>` nav. The drill always renders **inline**
+  regardless of the gesture, since the point is the in-place breadcrumb rewrite.
+- **The leap to a live shell isn't engine magic:** a script that sees `… shell`
+  simply *emits a `$`/`user@host$` cell* as its output, which the next run picks
+  up. Escalation is authored, not built in. (Engine-managed promotion stays a
+  future option if scripting it proves clunky.)
+
+Impl: `out_fence_at` (init.lua) detects a click inside an `out` body;
+`namespace.resolves` gates it; `run_namespace(..., to_buf=false)` re-runs inline.
+Demo fixture: `examples/bsh-home/demo/menu.sh`. Tests: the two menu cases in
+`tests/test_namespace.lua`.
+
 ## Output to a side buffer (a gesture, not a marker) — BUILT (2026-06-17)
 
 **Built:** `<C-CR>` / `g<CR>` runs a cell with output into a side buffer instead of

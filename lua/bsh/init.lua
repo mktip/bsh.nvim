@@ -91,6 +91,21 @@ local function input_fence_at(buf, row)
   }
 end
 
+-- If `row` sits inside an `out` fence's body, return its opening fence row
+-- (0-indexed); else nil. Used to recognise a click on a line of a command's
+-- output (for namespace menu-drilling). Bails on any other fence kind.
+local function out_fence_at(buf, row)
+  local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
+  if gl(row):match("^%s*```") then return nil end -- on a fence delimiter, not a body line
+  for r = row - 1, 0, -1 do
+    local s = gl(r)
+    if s:match("^%s*```out%s*$") then return r end
+    if s:match("^%s*```%S") then return nil end  -- some other opening fence
+    if s:match("^%s*```%s*$") then return nil end -- a closer above -> outside any fence
+  end
+  return nil
+end
+
 -- Dispatch on the current line. Returns true if something was handled, false to
 -- let <CR> fall through to its default.
 local function execute_cell(to_buf)
@@ -124,6 +139,31 @@ local function execute_cell(to_buf)
       run_oneshot(buf, fc.close, fc.indent, { config.python, "-c", fc.body }, to_buf)
     end
     return true
+  end
+
+  -- <C-CR> inside a namespace command's `out` fence: DRILL. Append the clicked
+  -- line as one quoted arg to the (dotted) trigger and re-run IN PLACE, so the
+  -- command can reinterpret it (list -> drill into one). The trigger accumulates
+  -- a breadcrumb (`docker.list` -> `docker.list <id>` -> `… start`) you can edit
+  -- or backspace to walk back up. On <C-CR>/g<CR> only -- never plain <CR> --
+  -- because output lines are noisy and a stray <CR> shouldn't re-fire the command
+  -- (`dir`/`tree` fences keep plain-<CR> nav; they're clean entry-per-line). The
+  -- re-run is inline regardless of the gesture, since drilling rewrites in place.
+  if to_buf then
+    local mopen = out_fence_at(buf, trow)
+    if mopen then
+      local trig = vim.api.nvim_buf_get_lines(buf, mopen - 1, mopen, false)[1] or ""
+      local tindent = trig:match("^(%s*)")
+      local nsname = vim.trim(trig):match("^([%w_][%w_%.%-]*)")
+      local clicked = vim.trim(line)
+      if nsname and clicked ~= "" and namespace.resolves(nsname) then
+        local newtrig = vim.trim(trig) .. " " .. vim.fn.shellescape(clicked)
+        vim.api.nvim_buf_set_lines(buf, mopen - 1, mopen, false, { tindent .. newtrig })
+        local nm, ar = newtrig:match("^([%w_][%w_%.%-]*)%s+(.+)$")
+        run_namespace(buf, mopen - 1, tindent, nm, ar, false) -- inline, in place
+        return true
+      end
+    end
   end
 
   -- inline shell: `[user@host]$ cmd` (one-shot) or `[user@host]$$ cmd` (shared

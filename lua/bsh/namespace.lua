@@ -19,6 +19,19 @@ function M.ns_home()
   return vim.fn.isdirectory(h) == 1 and h or ""
 end
 
+-- Does `dotted` resolve to something under $BSH_HOME (a dir, a leaf file, or a
+-- single-extension sibling)? A cheap path-only check -- no execution -- used to
+-- decide whether a command's output fence should behave as a drillable menu.
+function M.resolves(dotted)
+  local home = M.ns_home()
+  if home == "" then return false end
+  local clean = (dotted:gsub("%.+$", ""))
+  if clean == "" then return false end
+  local base = home .. "/" .. (clean:gsub("%.", "/"))
+  if vim.fn.isdirectory(base) == 1 or vim.fn.filereadable(base) == 1 then return true end
+  return #vim.fn.glob(base .. ".*", false, true) > 0
+end
+
 -- Run a resolved namespace leaf as a SHELL command (not a bare argv), so the
 -- cell is a continuation of the shell: `args` is appended raw and the whole line
 -- goes through `$`'s one-shot shell, giving redirection, pipes, globs, `$(...)`

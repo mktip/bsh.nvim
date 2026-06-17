@@ -35,7 +35,7 @@ end
 T["plain dir canonicalises to a trailing-dot listing"] = function()
   H.bootstrap(child, { lines = { "demo" } })
   H.run(child, 1)
-  eq(H.lines(child), { "demo.", "```dir", "../", "greet/", "hello.sh", "```" })
+  eq(H.lines(child), { "demo.", "```dir", "../", "greet/", "hello.sh", "menu.sh", "```" })
 end
 
 T["drilling a namespace listing stays dotted (no double dot)"] = function()
@@ -51,6 +51,27 @@ T["tag change replaces the old fence (no orphan)"] = function()
   child.lua("vim.api.nvim_buf_set_lines(0, 0, 1, false, { 'llm.tools' })")
   H.run(child, 1)
   eq(H.lines(child), { "llm.tools.", "```dir", "../", "reverse.py", "weather.py", "```" })
+end
+
+T["a command's output is a drillable menu on <C-CR> (append-as-arg)"] = function()
+  H.bootstrap(child, { lines = { "demo.menu" } })
+  H.run(child, 1) -- plain <CR>: list
+  eq(H.lines(child), { "demo.menu", "```out", "alpha", "beta", "```" })
+
+  -- <C-CR> on `alpha`: trigger gains the arg and re-runs in place -> sub-menu
+  H.run(child, H.rowof(child, "^alpha$"), true)
+  eq(H.lines(child), { "demo.menu 'alpha'", "```out", "alpha selected", "start", "stop", "```" })
+
+  -- drill again: <C-CR> on `start` appends a second arg
+  H.run(child, H.rowof(child, "^start$"), true)
+  eq(H.lines(child), { "demo.menu 'alpha' 'start'", "```out", "start -> alpha", "```" })
+end
+
+T["plain <CR> on a menu line does NOT drill (only <C-CR>)"] = function()
+  H.bootstrap(child, { lines = { "demo.menu" } })
+  H.run(child, 1)
+  H.run(child, H.rowof(child, "^alpha$")) -- plain <CR>: no-op drill, output unchanged
+  eq(H.lines(child), { "demo.menu", "```out", "alpha", "beta", "```" })
 end
 
 T["foo.bar! scaffolds an executable leaf, then it runs"] = function()
