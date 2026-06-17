@@ -12,13 +12,21 @@ local run_list = require("bsh.listing").run_list
 
 -- A namespace command can DECLARE its output a drillable menu by exiting with
 -- config.menu_exit (default 150): bsh then renders it as a ```menu fence whose
--- every line is a valid next arg (plain <CR> drills). The transform treats that
--- code as success (no `[exit N]` annotation); the retag flips the fence's tag.
-local function menu_transform(out, err, code)
-  return shell_transform(out, err, code == config.menu_exit and 0 or code)
+-- every line is a valid next arg (plain <CR> drills). It can instead EMIT A CELL
+-- by exiting config.cell_exit (151): its first line becomes a cell that replaces
+-- the trigger (see job.run_job's on_cell). Both special codes are "success" to the
+-- transform (no `[exit N]`); the retag flips the fence tag for the menu case.
+local function ns_transform(out, err, code)
+  if code == config.menu_exit or code == config.cell_exit then code = 0 end
+  return shell_transform(out, err, code)
 end
 local function menu_retag(code)
   return code == config.menu_exit and "menu" or nil
+end
+-- Exit config.cell_exit -> the command's first output line IS the replacement cell.
+local function cell_emit(code, lines)
+  if code == config.cell_exit then return lines[1] end
+  return nil
 end
 
 -- The namespace root ($BSH_HOME, default ~/pockt/bsh). Returns "" when it
@@ -40,7 +48,8 @@ end
 local function run_ns_exec(buf, trow, indent, path, args, to_buf)
   local cmd = vim.fn.shellescape(path)
   if args and args ~= "" then cmd = cmd .. " " .. args end
-  run_shell(buf, trow, indent, "", cmd, to_buf, { transform = menu_transform, retag = menu_retag })
+  run_shell(buf, trow, indent, "", cmd, to_buf,
+    { transform = ns_transform, retag = menu_retag, on_cell = cell_emit })
 end
 
 -- A `namespace` cell resolves a dotted name to a path under $BSH_HOME (dots ->

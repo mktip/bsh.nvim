@@ -44,6 +44,14 @@ M.scaffold_lang = "sh"
 -- it if it clashes with a real exit code your commands use.
 M.menu_exit = 150
 
+-- Exit code a namespace command returns to EMIT A CELL: its first output line is
+-- treated as cell text that REPLACES the trigger (the dotted/breadcrumb line) and
+-- its result fence -- so a command can hand back a new, ready-to-run cell instead
+-- of output. The keystone of "pick X -> get a `docker@<id>$$` session cell": a
+-- menu drill (exit 150) narrows to a target, then a terminal action exits this
+-- code printing e.g. `docker@<id>$$ ` and bsh swaps the breadcrumb for that cell.
+M.cell_exit = 151
+
 -- Yes/no gate before `foo.bar!` creates a NEW file (so a stray `word!` line can't
 -- silently scaffold). Overridable for customisation / tests; return true = go.
 function M.confirm(prompt)

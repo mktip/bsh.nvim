@@ -35,7 +35,7 @@ end
 T["plain dir canonicalises to a trailing-dot listing"] = function()
   H.bootstrap(child, { lines = { "demo" } })
   H.run(child, 1)
-  eq(H.lines(child), { "demo.", "```dir", "../", "greet/", "hello.sh", "menu.sh", "```" })
+  eq(H.lines(child), { "demo.", "```dir", "../", "greet/", "conn.sh", "hello.sh", "menu.sh", "```" })
 end
 
 T["drilling a namespace listing stays dotted (no double dot)"] = function()
@@ -66,6 +66,20 @@ T["exit-150 output becomes a ```menu fence, drillable on plain <CR>"] = function
   -- a terminal `out` fence (no longer a menu)
   H.run(child, H.rowof(child, "^start$"))
   eq(H.lines(child), { "demo.menu 'alpha' 'start'", "```out", "start -> alpha", "```" })
+end
+
+T["exit-151 emits a cell: drilling replaces the trigger + fence"] = function()
+  H.bootstrap(child, { lines = { "demo.conn" } })
+  H.run(child, 1) -- menu of "ids"
+  eq(H.lines(child), { "demo.conn", "```menu", "one", "two", "```" })
+
+  H.run(child, H.rowof(child, "^one$")) -- drill an id -> actions menu
+  eq(H.lines(child), { "demo.conn 'one'", "```menu", "open", "close", "```" })
+
+  -- drill `open`: the command exits config.cell_exit (151) printing a cell line,
+  -- so the breadcrumb trigger AND its fence are REPLACED by that ready cell.
+  H.run(child, H.rowof(child, "^open$"))
+  eq(H.lines(child), { "fake@one$$ " })
 end
 
 T["a non-menu (exit 0) command's `out` lines are inert on <CR>"] = function()

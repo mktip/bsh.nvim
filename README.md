@@ -131,6 +131,20 @@ case $# in
 esac
 ```
 
+**Emit a cell (exit `151`).** A command can also hand back a *new cell* instead of
+output: print one line and **exit `151`** (`cell_exit`), and bsh replaces the
+trigger (and its fence) with that line, cursor parked at its end. Combined with
+menus this gives "pick X → get a cell for X": a `docker.conn` lists running
+containers (a menu), and `<CR>` on one emits a `` docker@<id>$$ `` **session cell**
+— a live shell inside that container, ready to type into. The bundled
+`examples/bsh-home/docker/` shows the trio:
+
+| Command | Does |
+|---------|------|
+| `docker.conn` | menu of running containers → `<CR>` opens a `docker@<id>$$` shell |
+| `docker.list` | menu of *all* containers → actions: `shell` / `start` / `stop` / `restart` / `rm` |
+| `docker.create [name]` | spin up an alpine box (kept alive) → emits its `docker@<name>$$` shell |
+
 ## Install
 
 Requires Neovim 0.9+. Python cells need `python3`; agent cells need

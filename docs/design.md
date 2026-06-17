@@ -420,10 +420,40 @@ shares env/vars but NOT cwd (each cell its own directory — badges trivially
 coherent because each is independent), or the present whole-shell variant with
 live-broadcast badges. Pick later; for now the snapshot is honest if named right.
 
-**Next slice:** a `docker.list` namespace command that drills a container id into a
-`docker@id$$` session cell (ties the route grammar to the menu model). VM
-**consoles** (PTY) stay with the parked interactivity work; the ssh-style `vm`
-template covers the exec case now.
+## Emit-a-cell + the docker commands — BUILT (2026-06-18, slice 3)
+
+The menu model could only *append an arg and re-run*. Slice 3 adds the dual move:
+a command **emits a cell**. Exit `config.cell_exit` (151) and the command's first
+output line is treated as cell text that **replaces the trigger and its fence**
+(cursor parked at the line's end) — so a command hands back a ready-to-run cell
+instead of output. It's the natural sibling of exit 150 (declare-a-menu): one says
+"my output is the next *args*," the other "my output is the next *cell*."
+
+Mechanism: `job.run_job` gained an `on_cell(code, lines) -> cell|nil` hook
+(inline only, takes precedence over paint/retag); `bsh.namespace` passes a
+`cell_emit` that fires on `cell_exit`. The fence range is recovered from the body
+extmark (opening = mark−1, trigger = mark−2, closing = next bare ```), and
+[trigger, fence-end) is swapped for the one cell line. `ns_transform` treats both
+special codes as success (no `[exit N]`).
+
+This finally **ties the route grammar to the menu model**: `examples/bsh-home/docker/`
+is the worked trio —
+- `docker.conn` — `docker ps` as a menu (150); `<CR>` a row → emits `docker@<id>$$ `
+  (151), a live container shell (the slice-2 session-over-transport).
+- `docker.list` — `docker ps -a` menu → an actions sub-menu (`shell`/`start`/`stop`/
+  `restart`/`rm`); `shell` emits a cell, the rest print into an `out` fence.
+- `docker.create [name]` — `docker run -d … alpine sleep infinity`, then emits the
+  new box's `docker@<name>$$ ` cell. Create-then-shell in one `<CR>`.
+
+The drilled menu line arrives as one quoted arg (`"<id>  <image>  <name>"`), so the
+scripts take `${1%% *}` as the id. Tested docker-free via `demo.conn`
+(`tests/test_namespace.lua`: menu → drill → exit-151 replaces the trigger), and
+live end-to-end against a real (podman-backed) container: `docker.conn` → drill →
+`docker@<id>$$ cat /etc/alpine-release` → `3.24.1` *inside* the container.
+
+**Next:** VM **consoles** (PTY) stay with the parked interactivity work; the
+ssh-style `vm` template covers the exec case now. A `git.*`/`db.*` flagship and the
+`bsh` PATH dispatcher remain the larger open threads.
 
 ## Output to a side buffer (a gesture, not a marker) — BUILT (2026-06-17)
 

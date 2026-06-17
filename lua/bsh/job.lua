@@ -103,7 +103,12 @@ end
 -- `retag(code) -> tag|nil` (inline only): on exit, may change the fence's opening
 -- delimiter to a different owned tag based on the exit code -- used so a command
 -- can DECLARE its output a `menu` (drillable) by its exit status.
-local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag)
+-- `on_cell(code, lines) -> cell|nil` (inline only): on exit, may return a line of
+-- cell text; if it does, the trigger (the line above the fence) AND the fence are
+-- REPLACED by that cell (cursor parked at its end) -- so a command can hand back a
+-- ready-to-run cell (e.g. `docker@<id>$$ `) instead of output. Takes precedence
+-- over normal painting/retag.
+local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag, on_cell)
   local acc, err_data = "", {}
   local n = 1 -- how many body lines we currently occupy (starts: the placeholder)
   -- replace our [row, row+n) body region with `lines`; returns the new n.
@@ -139,6 +144,31 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
     on_exit = function(_, code)
       vim.schedule(function()
         local final = transform(split_out(), err_data, code)
+        -- inline only: a command can EMIT A CELL -- swap its trigger + fence for a
+        -- single line of cell text (e.g. a `docker@<id>$$ ` session cell). Takes
+        -- precedence over painting; the fence/extmark are removed in the process.
+        if on_cell and not sink and vim.api.nvim_buf_is_valid(buf) then
+          local cell = on_cell(code, final)
+          local pos = cell and vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
+          if pos and pos[1] and pos[1] >= 2 then
+            local body, total = pos[1], vim.api.nvim_buf_line_count(buf)
+            local trigr = body - 2 -- trigger is the line above the opening fence
+            local endr = body       -- scan from the body for the closing ``` (exclusive end)
+            for r = body, total - 1 do
+              if (vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or ""):match("^%s*```%s*$") then
+                endr = r + 1; break
+              end
+            end
+            local newline = indent .. cell
+            vim.api.nvim_buf_set_lines(buf, trigr, endr, false, { newline })
+            pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
+            if inflight[buf] then inflight[buf][mark] = nil end
+            if vim.api.nvim_get_current_buf() == buf then
+              pcall(vim.api.nvim_win_set_cursor, 0, { trigr + 1, #newline })
+            end
+            return
+          end
+        end
         paint(#final > 0 and final or { "(no output)" }, true, code)
         -- inline only: let the command re-tag its own fence by exit code (e.g.
         -- exit 150 -> `menu`). The body extmark still resolves the body top, so
@@ -269,8 +299,9 @@ end
 -- in an `out` fence; with `to_buf` (<C-CR>), into a side buffer with a `log`
 -- reference fence. A cell that already owns a `log` fence stays routed there even
 -- on a plain <CR> (sticky), reusing that same buffer.
--- `opts` (optional): { transform, retag } -- the namespace path passes these so a
--- command's exit code can declare its output a `menu` (see bsh.namespace).
+-- `opts` (optional): { transform, retag, on_cell } -- the namespace path passes
+-- these so a command's exit code can declare its output a `menu`, or EMIT a cell
+-- that replaces the trigger (see bsh.namespace).
 local function run_shell(buf, trow, indent, target, cmd, to_buf, opts)
   opts = opts or {}
   local transform = opts.transform or shell_transform
@@ -285,7 +316,7 @@ local function run_shell(buf, trow, indent, target, cmd, to_buf, opts)
   end
   local mark = stage_fence(buf, trow, indent, "out",
     remote and ("...running on " .. target .. "...") or "...running...")
-  run_job(buf, indent, mark, build_argv(target, cmd), cwd, transform, nil, nil, opts.retag)
+  run_job(buf, indent, mark, build_argv(target, cmd), cwd, transform, nil, nil, opts.retag, opts.on_cell)
 end
 
 -- A one-shot (`$`) run of an explicit argv (used for non-shell one-shots like
