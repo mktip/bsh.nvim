@@ -20,6 +20,10 @@
 
 local M = {}
 
+local util = require("bsh.util")
+local join_path, parse_list_args, qpath = util.join_path, util.parse_list_args, util.qpath
+local tree_entry, parse_runmarker = util.tree_entry, util.parse_runmarker
+
 -- Remote (`user@host$ cmd`) cells run in a login shell so the remote profile
 -- and bashrc load (PATH, pkg, env). Set false for a bare, faster `ssh host cmd`
 -- when the remote already has the env you need or you want zero startup files.
@@ -514,34 +518,6 @@ function M.stop_session(buf)
   end
 end
 
--- `: path [-T] [-H]` : peel any trailing recognised flags off the trigger
--- remainder, leaving the path. -T = tree view, -H = include hidden (dotfiles).
--- Empty path means the document/login dir.
-local function parse_list_args(rest)
-  local flags = { tree = false, hidden = false }
-  local path = rest
-  while true do
-    local f = path:match("%s(%-%a)%s*$")
-    if f == "-T" then flags.tree = true
-    elseif f == "-H" then flags.hidden = true
-    else break end -- no flag, or an unknown one we leave in the path
-    path = path:gsub("%s%-%a%s*$", "", 1)
-  end
-  path = (path:gsub("^%s+", "")):gsub("%s+$", "")
-  if path == "" then path = "." end
-  return path, flags
-end
-
--- Quote a path for the shell while keeping a leading ~ / ~user prefix expandable.
--- Tilde expansion needs the slash right after ~ to be UNQUOTED (it ends the
--- tilde-prefix), so keep `~prefix/` verbatim and shellescape only the rest.
-local function qpath(path)
-  local pre, rest = path:match("^(~[^/]*/)(.*)$")
-  if pre then return pre .. (rest == "" and "" or vim.fn.shellescape(rest)) end
-  if path:match("^~[^/]*$") then return path end -- bare ~ or ~user
-  return vim.fn.shellescape(path)
-end
-
 local run_goto -- forward decl (run_list dispatches to it; it lists the result)
 
 -- `: <path>` (or `<user@host>: <path>`) : list a directory into a navigable
@@ -624,15 +600,6 @@ function run_goto(buf, trow, indent, target, query, flags)
   if job > 0 then inflight[buf][mark] = job; pcall(vim.fn.chanclose, job, "stdin") end
 end
 
--- Join a listing's base path with a clicked entry; `..` walks up one segment
--- (pure string op, so it works for remote paths too).
-local function join_path(base, name)
-  if name == ".." then return vim.fn.fnamemodify((base:gsub("/+$", "")), ":h") end
-  base = (base:gsub("/+$", ""))
-  if base == "" then base = "." end
-  return base .. "/" .. name
-end
-
 -- Open a file entry: local via :edit; remote via netrw scp:// (best effort,
 -- needs netrw enabled). `~/x` -> home-relative URL, `/x` -> // absolute URL.
 local function open_entry(target, path)
@@ -664,20 +631,6 @@ local function fence_open(buf, row)
     if s:match("^%s*```%s*$") then return nil end -- closer above -> outside
   end
   return nil
-end
-
--- Parse one `tree -F` body line into (depth, name). The connector `├── `/`└── `
--- (and the `│   `/`    ` indent groups) are multibyte, so match the literal
--- connector and measure depth by display columns (each level = 4 columns).
-local function tree_entry(line)
-  for _, conn in ipairs({ "├── ", "└── " }) do
-    local i = line:find(conn, 1, true)
-    if i then
-      local depth = math.floor(vim.fn.strdisplaywidth(line:sub(1, i - 1)) / 4) + 1
-      return depth, line:sub(i + #conn)
-    end
-  end
-  return nil -- root line / summary / blank: not an entry
 end
 
 -- Reconstruct the path of the tree entry at `row` by walking up to collect one
@@ -795,20 +748,7 @@ end
 --   $  $$  user@host$            -> bash (lang "sh"), no language word
 --   python $   py $$   ruby $$   -> a language word, then optional target + marker
 -- No trailing marker (a plain ```python doc block, or ```out) -> nil (inert).
-local LANG_ALIAS = { sh = "sh", bash = "sh", shell = "sh", py = "python", python = "python" }
-local function parse_runmarker(info)
-  local word, rest = info:match("^(%a[%w_]*)%s+(.+)$")
-  if word then -- language-prefixed form
-    local lang = LANG_ALIAS[word]
-    if not lang then return nil end
-    local tgt, dbl = rest:match("^(%S-)%$(%$?)$")
-    if tgt then return lang, tgt, dbl == "$" end
-    return nil
-  end
-  local tgt, dbl = info:match("^(%S-)%$(%$?)$") -- bare bash form
-  if tgt then return "sh", tgt, dbl == "$" end
-  return nil
-end
+-- (parse_runmarker lives in bsh.util.)
 
 -- A MULTILINE input cell is a fenced code block whose info-string parses as a run
 -- marker (see parse_runmarker). If the cursor sits anywhere inside such a block,
