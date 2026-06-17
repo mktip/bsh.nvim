@@ -208,17 +208,24 @@ run in **the user's repo**, not the document's dir. Proposed model:
 |------|---------|
 | `foo.bar` | run (dir → `.enter` or list) |
 | `foo.bar.` | peek/list the dir (built) |
-| `foo.bar arg1 arg2` | run, passing args as `argv` to the leaf |
+| `foo.bar arg1 arg2` | run with args, **through the shell** (built) |
 | `foo.bar!` | edit the leaf's source; **scaffold it if missing** |
 | `$ bsh foo.bar [args]` | run from any shell/session cell, in the shell's `$PWD` |
 
-### 1. Inline args (`foo.bar arg…`)
+### 1. Inline args (`foo.bar arg…`) — BUILT (2026-06-17)
 
-Relax `run_namespace`'s "line must be *just* the dotted name" rule to
-`^(dotted)%s+(.+)$`: shell-word-split the rest into `argv` and pass it to the
-executable (`weather.py` already reads `sys.argv[1]`). Still gated on the first
-token resolving to a real leaf, so prose stays prose. This is the obvious,
-shell-like answer for the in-buffer case.
+Dispatch now also matches `^(dotted)%s+(.+)$`. Crucially, the leaf is **not**
+exec'd as a bare argv — it's resolved to its path and run as a **shell command**
+via `$`'s one-shot machinery (`run_ns_exec` → `run_shell(buf,…, shellescape(path)
+.. " " .. rest)`). So a namespace cell is a true **continuation of the shell**:
+the rest of the line is shell syntax, so redirection (`> out.txt`), pipes
+(`| grep`), globs, and sub-shells (`$(…)`) all work, not just positional args.
+Runs in the document's dir, like `$`. Still gated on the first token resolving, so
+prose (`hello world`) and `<dir> <args>` (no `.enter`) fall through to prose.
+Verified: `llm.tools.reverse hello`→`olleh`, `… | tr a-z A-Z`, `reverse "$(echo
+abc)"`→`cba`, `weather Izmir > file`. (Conceptually this is the in-buffer twin of
+the future `$ bsh foo.bar …` dispatcher; bsh resolves the path itself so it needs
+no external binary yet.)
 
 ### 2. Define-in-place (`foo.bar!`)
 
@@ -354,7 +361,11 @@ a buffer's `python $$` cells as **one** otter document, so statically-defined
 symbols carry across cells the same way the session accumulates them — otter's
 per-language concatenation ≈ the session's accumulated namespace. Probably out of
 scope for bsh proper (a user can add otter themselves), but bsh could expose the
-cell ranges/order to make it work well.
+cell ranges/order to make it work well. It's also worth remembering that `$$`
+does not only connect visible `$$` instances, but even absent ones. A user can
+mutate the state in a `$$` then delete it from the file, yet the mutation is
+still in the state and the lsp will still be unaware of it even if all `$$`
+cells were given to it for context.
 
 ## Other roadmap bits (parked)
 

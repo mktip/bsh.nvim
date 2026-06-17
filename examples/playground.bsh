@@ -53,7 +53,11 @@ print("area =", round(math.pi * r * r, 2))   # sees r + math from the cell above
 
 llm.tools.weather
 
-llm.tools.reverse
+llm.tools.weather Ankara
+
+llm.tools.weather Ankara | tr a-z A-Z
+
+llm.tools.reverse hello
 
 llm.tools
 

@@ -705,9 +705,19 @@ local function input_fence_at(buf, row)
   }
 end
 
--- A `namespace` cell is a bare dotted identifier on its own line that resolves
--- to a path under $BSH_HOME (dots -> slashes): `llm.tools.weather`. Enter
--- dispatches on what's there:
+-- Run a resolved namespace leaf as a SHELL command (not a bare argv), so the
+-- cell is a continuation of the shell: `args` is appended raw and the whole line
+-- goes through `$`'s one-shot shell, giving redirection, pipes, globs, `$(...)`
+-- sub-shells -- everything the outer shell does. The path is quoted; args are not
+-- (they ARE shell syntax). Runs in the document's dir, like `$`.
+local function run_ns_exec(buf, trow, indent, path, args)
+  local cmd = vim.fn.shellescape(path)
+  if args and args ~= "" then cmd = cmd .. " " .. args end
+  run_shell(buf, trow, indent, "", cmd)
+end
+
+-- A `namespace` cell resolves a dotted name to a path under $BSH_HOME (dots ->
+-- slashes): `llm.tools.weather`. Enter dispatches on what's there:
 --   * a file is executed by its shebang into an `out` fence (so a dual-purpose
 --     `weather.py` runs its `__main__`); the leaf may carry any extension
 --     (`...weather` matches `weather` or `weather.<ext>`) since dispatch is
@@ -717,8 +727,12 @@ end
 --     TRAILING DOT (`demo` -> `demo.`) so its entries navigate as `demo.<child>`.
 -- A trailing dot is also an explicit "peek inside" operator: `demo.greet.` lists
 -- the dir even when `demo.greet` (no dot) would have run its `.enter`.
+-- `args` (the rest of the line after the dotted name) is passed to an executable
+-- leaf/`.enter` as shell args; for a plain directory it's meaningless, so
+-- `<dir> <args>` falls through to prose.
 -- Returns true if it resolved+handled, false (prose) otherwise.
-local function run_namespace(buf, trow, indent, dotted)
+local function run_namespace(buf, trow, indent, dotted, args)
+  args = args or ""
   local home = ns_home()
   if home == "" then return false end
   local force_list = dotted:sub(-1) == "."          -- trailing dot = list, not .enter
@@ -729,7 +743,9 @@ local function run_namespace(buf, trow, indent, dotted)
   if vim.fn.isdirectory(base) == 1 then
     local enter = base .. "/.enter"
     if not force_list and vim.fn.executable(enter) == 1 then
-      run_oneshot(buf, trow, indent, { enter })
+      run_ns_exec(buf, trow, indent, enter, args)
+    elseif args ~= "" then
+      return false -- `<dir> <args>` with nothing to run -> prose
     else
       -- canonicalise the trigger to `clean.` so the listing's entries resolve as
       -- `clean.<child>` (and re-running this cell is idempotent). List with -H so
@@ -746,7 +762,7 @@ local function run_namespace(buf, trow, indent, dotted)
   for _, p in ipairs(cands) do
     if vim.fn.filereadable(p) == 1 then
       if vim.fn.executable(p) == 1 then
-        run_oneshot(buf, trow, indent, { p }) -- run by shebang
+        run_ns_exec(buf, trow, indent, p, args) -- run by shebang, through the shell
       else
         vim.notify("bsh: " .. p .. " is not executable (chmod +x it)", vim.log.levels.WARN)
       end
@@ -889,9 +905,15 @@ local function execute_cell()
     return true
   end
 
-  -- `namespace` cell: a bare dotted identifier resolving under $BSH_HOME.
-  -- Checked last and gated on the path actually existing, so ordinary prose
-  -- words (which won't resolve) fall through untouched.
+  -- `namespace` cell: a dotted identifier resolving under $BSH_HOME, optionally
+  -- followed by args (`llm.tools.weather Ankara`, `... > out.txt`, `... | grep C`).
+  -- The args go through the shell (see run_ns_exec), so the cell is a true shell
+  -- continuation. Checked last and gated on the FIRST token resolving, so prose
+  -- (which won't resolve) falls through untouched -- args form tried first.
+  local nsname, nsargs = line:match("^%s*([%w_][%w_%.%-]*)%s+(.+)$")
+  if nsname and run_namespace(buf, trow, indent, nsname, nsargs) then
+    return true
+  end
   local dotted = line:match("^%s*([%w_][%w_%.%-]*)%s*$")
   if dotted and run_namespace(buf, trow, indent, dotted) then
     return true
