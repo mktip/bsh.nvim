@@ -183,13 +183,85 @@ stays prose) is a cell. `<CR>` (`run_namespace`):
 
 Verified: `.py` and `.sh` leaves both run by shebang; dir lists; `.enter` runs.
 
-**Next refinements (not yet built):**
-- Drill/run *within* a namespace listing: Enter on an entry should stay in the
-  dotted namespace (subdir → `llm.tools.sub`, executable file → run it) rather
-  than the current generic `:` behavior (drill rewrites to an abs path; files
-  open in the editor). Needs the listing to know it's "namespace mode".
-- Inputs on Enter (run `main()` vs prompt for args vs demo).
+**Refined (built 2026-06-17):**
+- Drill *within* a namespace listing now stays dotted: a listing's trigger
+  carries a **trailing dot** (`demo.`) so entries resolve as `demo.<child>`;
+  subdir → descend+list, file → open in the editor.
+- A trailing dot is an explicit **peek/list** operator: `demo.greet.` lists the
+  folder even when `demo.greet` (no dot) would run its `.enter`. A plain dir
+  without an `.enter` canonicalises its trigger to `name.` and lists. Listings
+  pass `-H` so the `.enter` dotfile is visible.
+
+**Still not built:**
 - A `:BshHome` entry point to list the root for discovery.
+- See "Defining & invoking commands" below for args + authoring.
+
+## Defining & invoking commands (open design, the next big rock)
+
+Three gaps surfaced once the namespace existed: commands take **no args**, there's
+no way to **author** one from inside bsh, and a command like `git.undo` needs to
+run in **the user's repo**, not the document's dir. Proposed model:
+
+### A unified namespace gesture grammar
+
+| Form | Meaning |
+|------|---------|
+| `foo.bar` | run (dir → `.enter` or list) |
+| `foo.bar.` | peek/list the dir (built) |
+| `foo.bar arg1 arg2` | run, passing args as `argv` to the leaf |
+| `foo.bar!` | edit the leaf's source; **scaffold it if missing** |
+| `$ bsh foo.bar [args]` | run from any shell/session cell, in the shell's `$PWD` |
+
+### 1. Inline args (`foo.bar arg…`)
+
+Relax `run_namespace`'s "line must be *just* the dotted name" rule to
+`^(dotted)%s+(.+)$`: shell-word-split the rest into `argv` and pass it to the
+executable (`weather.py` already reads `sys.argv[1]`). Still gated on the first
+token resolving to a real leaf, so prose stays prose. This is the obvious,
+shell-like answer for the in-buffer case.
+
+### 2. Define-in-place (`foo.bar!`)
+
+`!` = "edit source, creating if absent" — mirrors `:Bsh!` (= create/force). On an
+**unresolved** name, scaffold `$BSH_HOME/foo/bar` (executable, with a shebang +
+`__main__`/`register_tools` skeleton) and open it in a split; on an **existing**
+leaf, just open it to edit. One operator covers both "make new command" and "jump
+to a command's source". Explicit, so a typo never auto-creates a file (keeps the
+"unresolved → prose" guarantee for the no-bang form).
+
+### 3. The `bsh` PATH dispatcher (the keystone for args + cwd)
+
+A tiny launcher binary `bsh` on `$PATH` that resolves a dotted name under
+`$BSH_HOME` and `exec`s the leaf **in the caller's `$PWD`**, forwarding args:
+
+```sh
+cd ~/myrepo
+bsh git.undo            # runs git.undo IN ~/myrepo, not the document's dir
+bsh db.prod "select 1"  # args forwarded
+```
+
+Why this is the unifier:
+- **Solves the cwd problem** (`git.undo` in *your* repo): route through a `$$`
+  session that `cd`'d there — `$$ cd ~/myrepo` then `$$ bsh git.undo`.
+- **One tree, everywhere:** the same namespace works in a real terminal outside
+  nvim, and from `$`/`:` cells — directly answering "should commands be callable
+  from the shell?". Yes: via `bsh`.
+- In-buffer namespace cells keep running in the doc's dir (fine when the doc
+  lives in the repo); for repo-relative work, go through a session + `bsh`.
+
+Open: whether the in-buffer `foo.bar` cell should also honour the buffer's `$$`
+session cwd (deeper integration) or stay doc-dir. Lean: keep simple, push
+repo-relative through `bsh` in a session.
+
+### Flagship tool use cases (to dogfood + demo)
+
+Pick targets that show the namespace+listing model off, à la Xiki:
+- **`db.*` — a database browser/query** (Xiki was loved for this). `db.prod`
+  lists tables → `db.prod.users` lists/queries rows into a `dir`/table fence →
+  drill a row to expand it. Maps perfectly onto dotted-namespace + drill-in.
+- **`git.*` — small sharp commands**: `git.undo` (soft-reset last commit, keep
+  changes), `git.wip`, `git.sync`. Great with the `bsh`-in-a-session cwd story.
+- Others that fit: `http.get <url>`, `json.*`, `notes.*`, `docker.*`.
 
 ## Other roadmap bits (parked)
 
@@ -202,4 +274,10 @@ Verified: `.py` and `.sh` leaves both run by shebang; dir lists; `.enter` runs.
 - **Interactive tree**: replace the `tree -F` text dump with a lazy,
   inline-expandable tree (folders expand/collapse in place, children listed on
   demand) — structure lives in indentation, no `tree` dependency, no upfront
-  full dump. Same gesture as the namespace browser above.
+  full dump. Same gesture as the namespace browser above. **Motivated by:** the
+  current `tree` fence can't **fold subtrees** — it's a flat dump, so you can't
+  collapse a branch you don't care about. Lazy expand-in-place gives folding for
+  free (a collapsed node just doesn't list its children) and fixes big-tree perf
+  at the same time. (Interim cheaper option if needed: a tree-aware `foldexpr`
+  that folds by `tree -F` indentation depth — but expand-in-place is the real
+  fix.)
