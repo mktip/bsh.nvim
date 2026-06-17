@@ -91,9 +91,87 @@
 // name you typed (readable), but where the registry knows an IP the name becomes
 // a clickable `ssh://<ip>` link, so the *reference target* is the address. An
 // unknown host renders `?host` (still legible) instead of a hard compile error.
+// ─────────────────────────── fence-kind cards ───────────────────────────────
+// The non-shell owned fences (`:` listings, namespace menus, the `>` agent, the
+// `log` side-buffer reference) stay plain ```<tag> raw blocks in the buffer — so
+// the editor's drill/open navigation, which scans for those delimiters, is
+// untouched — and these show-rules turn each into a card at typeset time. Shell
+// keeps `#cell` (it carries host/cwd/code chrome a raw block can't).
+
+// Shared flat card: a kind-label strip, then the body. Matches the terminal card
+// (no rounded corners, no fake chrome).
+#let _kindcard(label, accent, body) = {
+  let t = bsh-theme
+  block(width: 100%, fill: t.bg, breakable: false, {
+    block(width: 100%, fill: t.chrome, inset: (x: 12pt, y: 5pt),
+      text(fill: accent, size: 8pt, weight: "medium", font: "DejaVu Sans Mono", label))
+    block(width: 100%, inset: (x: 12pt, y: 10pt), body)
+  })
+}
+
+// A `:` / namespace directory listing. Entries ending `/` are dirs (accent);
+// `../` is the muted parent; everything else a file. Monospace, verbatim.
+#let _listing(txt) = {
+  let t = bsh-theme
+  _kindcard("dir", t.host, text(font: "DejaVu Sans Mono", size: 9pt, {
+    for (i, line) in txt.split("\n").enumerate() {
+      if i > 0 { linebreak() }
+      if line == "../" { text(fill: t.muted)[../] }
+      else if line.ends-with("/") { text(fill: t.host)[#line] }
+      else { text(fill: t.fg)[#line] }
+    }
+  }))
+}
+
+// A namespace menu (exit 150): each line a choosable item, marked with `›`.
+#let _menu(txt) = {
+  let t = bsh-theme
+  _kindcard("menu", t.prompt, text(font: "DejaVu Sans Mono", size: 9pt, {
+    for (i, line) in txt.split("\n").enumerate() {
+      if i > 0 { linebreak() }
+      if line.trim() == "" { } else {
+        text(fill: t.prompt)[› ] + text(fill: t.fg)[#line]
+      }
+    }
+  }))
+}
+
+// The `>` agent: the LLM's reply, set as prose (serif, reflowed) behind a left
+// accent bar — visually distinct from terminal output. The `>`/`>>` prompt line
+// itself stays above it in the document.
+#let _agent(txt) = {
+  let t = bsh-theme
+  let accent = rgb("#c678dd")
+  block(width: 100%, fill: t.bg, breakable: false, {
+    block(width: 100%, fill: t.chrome, inset: (x: 12pt, y: 5pt),
+      text(fill: accent, size: 8pt, weight: "medium", font: "DejaVu Sans Mono")[✦ agent])
+    // left accent bar via a left stroke; paragraphs reflow (single newlines -> spaces)
+    block(width: 100%, inset: (left: 15pt, rest: 10pt), stroke: (left: 2pt + accent),
+      text(fill: t.fg, size: 9.5pt, {
+        let paras = txt.split("\n\n")
+        for (i, para) in paras.enumerate() {
+          if i > 0 { parbreak() }
+          par(para.replace("\n", " "))
+        }
+      }))
+  })
+}
+
+// A `log` side-buffer reference: a compact muted pill (it's a pointer, not output).
+#let _log(txt) = {
+  let t = bsh-theme
+  block(width: 100%, fill: t.chrome, inset: (x: 10pt, y: 6pt),
+    text(fill: t.muted, font: "DejaVu Sans Mono", size: 8pt, txt.replace("\n", " ")))
+}
+
 #let bsh(doc, hosts: (:)) = {
   set text(font: "DejaVu Sans", size: 10pt)
   set par(leading: 0.65em)
+  show raw.where(lang: "dir"): it => _listing(it.text)
+  show raw.where(lang: "tree"): it => _listing(it.text)
+  show raw.where(lang: "menu"): it => _menu(it.text)
+  show raw.where(lang: "agent"): it => _agent(it.text)
+  show raw.where(lang: "log"): it => _log(it.text)
   show ref: it => {
     let key = str(it.target)
     if key in hosts {
