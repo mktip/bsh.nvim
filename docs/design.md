@@ -227,14 +227,20 @@ abc)"`→`cba`, `weather Izmir > file`. (Conceptually this is the in-buffer twin
 the future `$ bsh foo.bar …` dispatcher; bsh resolves the path itself so it needs
 no external binary yet.)
 
-### 2. Define-in-place (`foo.bar!`)
+### 2. Define-in-place (`foo.bar!`) — BUILT (2026-06-17)
 
-`!` = "edit source, creating if absent" — mirrors `:Bsh!` (= create/force). On an
-**unresolved** name, scaffold `$BSH_HOME/foo/bar` (executable, with a shebang +
-`__main__`/`register_tools` skeleton) and open it in a split; on an **existing**
-leaf, just open it to edit. One operator covers both "make new command" and "jump
-to a command's source". Explicit, so a typo never auto-creates a file (keeps the
-"unresolved → prose" guarantee for the no-bang form).
+`!` = "edit source, creating if absent" — mirrors `:Bsh!` (= create/force).
+`edit_namespace`:
+- **existing leaf** (`bar` or `bar.<ext>`) → opens it in a `:split`.
+- **existing directory** → opens its `.enter` (its behavior definition), or offers
+  to scaffold one.
+- **nothing there** → after a **confirm** (typo-guard, so a stray `word!` line
+  can't silently create a file), scaffold an executable leaf and open it.
+Scaffolds via `M.scaffold_lang` (`"sh"` default = a plain shell command; `"python"`
+= the dual-purpose command/`llm`-tool skeleton with `register_tools` + `__main__`);
+parent dirs created, exec bit set, so it's runnable immediately — `demo.newcmd!`
+then `demo.newcmd world` works in one loop. Confirm is `M.confirm` (overridable).
+One operator covers both "make new command" and "jump to a command's source".
 
 ### 3. The `bsh` PATH dispatcher (the keystone for args + cwd)
 

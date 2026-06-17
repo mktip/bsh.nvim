@@ -59,6 +59,11 @@ llm.tools.weather Ankara | tr a-z A-Z
 
 llm.tools.reverse hello
 
+## define/edit a command in place: foo.bar! opens its source
+## (scaffolds a new executable, after a confirm, if it doesn't exist yet)
+
+llm.tools.weather!
+
 llm.tools
 
 host

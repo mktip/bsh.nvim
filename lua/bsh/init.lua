@@ -33,6 +33,17 @@ M.agent_template = "web"
 -- interpreter used for `python` cells (one-shot `python $` and session `python $$`).
 M.python = "python3"
 
+-- language a `foo.bar!` define-in-place scaffolds a NEW leaf in: "sh" (a plain
+-- shell command, lowest friction) or "python" (the dual-purpose command/`llm`
+-- tool skeleton). Cosmetic extension only; dispatch stays shebang-driven.
+M.scaffold_lang = "sh"
+
+-- Yes/no gate before `foo.bar!` creates a NEW file (so a stray `word!` line can't
+-- silently scaffold). Overridable for customisation / tests; return true = go.
+M.confirm = function(prompt)
+  return vim.fn.confirm(prompt, "&Yes\n&No", 2) == 1
+end
+
 local ns = vim.api.nvim_create_namespace("bsh")
 
 -- in-flight shell jobs, keyed by buffer then by the body extmark id, so a cell
@@ -772,6 +783,99 @@ local function run_namespace(buf, trow, indent, dotted, args)
   return false -- nothing under $BSH_HOME -> treat as prose
 end
 
+-- The candidate source file for a resolved namespace leaf (exact name first, then
+-- a single-extension sibling like `weather.py`); nil if none exists yet.
+local function ns_leaf_path(base)
+  if vim.fn.filereadable(base) == 1 then return base end
+  for _, g in ipairs(vim.fn.glob(base .. ".*", false, true)) do
+    if vim.fn.filereadable(g) == 1 then return g end
+  end
+  return nil
+end
+
+-- Starter templates for a freshly scaffolded leaf. `@N@` = the dotted name, `@F@`
+-- = the last segment as a valid identifier. Shell is the low-friction default;
+-- python is the dual-purpose command/`llm`-tool keystone.
+local SCAFFOLD = {
+  sh = {
+    ext = ".sh",
+    body = table.concat({
+      "#!/usr/bin/env bash",
+      "# bsh command: @N@   (run with: @N@ [args]; args are in \"$@\")",
+      "",
+      'echo "hello from @N@ $*"',
+      "",
+    }, "\n"),
+  },
+  python = {
+    ext = ".py",
+    body = table.concat({
+      "#!/usr/bin/env python3",
+      '"""@N@ — a bsh command / llm tool."""',
+      "import sys",
+      "",
+      "",
+      "def @F@(text: str = \"\") -> str:",
+      '    "TODO: describe what @F@ does."',
+      "    return text",
+      "",
+      "",
+      "try:",
+      "    import llm",
+      "",
+      "    @llm.hookimpl",
+      "    def register_tools(register):",
+      "        register(@F@)",
+      "except ImportError:",
+      "    pass",
+      "",
+      "",
+      'if __name__ == "__main__":',
+      "    print(@F@(\" \".join(sys.argv[1:])))",
+      "",
+    }, "\n"),
+  },
+}
+
+-- Write an executable scaffold for `dotted` at `path` and return it. Creates
+-- parent dirs; fills the template; sets the exec bit so it's runnable at once.
+local function scaffold_leaf(dotted, path)
+  local fname = (dotted:gsub(".*%.", "")):gsub("[^%w_]", "_")
+  local spec = SCAFFOLD[M.scaffold_lang] or SCAFFOLD.sh
+  local body = (spec.body:gsub("@N@", dotted):gsub("@F@", fname))
+  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+  vim.fn.writefile(vim.split(body, "\n"), path)
+  vim.fn.setfperm(path, "rwxr-xr-x")
+  return path
+end
+
+-- `foo.bar!` : edit the leaf's SOURCE -- the authoring half of the namespace.
+-- Existing leaf/`.enter` opens straight in a split; a missing one is scaffolded
+-- (after a confirm, so a stray `word!` line can't silently create a file) with a
+-- shebang skeleton and opened. Returns true if handled (home set), false (prose).
+local function edit_namespace(dotted)
+  local home = ns_home()
+  if home == "" then return false end
+  local base = home .. "/" .. (dotted:gsub("%.", "/"))
+
+  -- existing: a leaf file, or a directory's `.enter` (its behavior definition)
+  local path = ns_leaf_path(base)
+  if not path and vim.fn.isdirectory(base) == 1 then
+    local enter = base .. "/.enter"
+    path = vim.fn.filereadable(enter) == 1 and enter or nil
+    if not path then -- offer to define this folder's `.enter`
+      if not M.confirm("bsh: define " .. dotted .. "/.enter ?") then return true end
+      path = scaffold_leaf(dotted, enter)
+    end
+  elseif not path then -- nothing there: scaffold a new leaf (with a typo-guard)
+    if not M.confirm("bsh: create command '" .. dotted .. "' ?") then return true end
+    path = scaffold_leaf(dotted, base .. (SCAFFOLD[M.scaffold_lang] or SCAFFOLD.sh).ext)
+  end
+
+  vim.cmd("split " .. vim.fn.fnameescape(path))
+  return true
+end
+
 -- Dispatch on the current line. Returns true if something was handled, false to
 -- let <CR> fall through to its default.
 local function execute_cell()
@@ -902,6 +1006,14 @@ local function execute_cell()
     else
       open_entry(ttarget, full)
     end
+    return true
+  end
+
+  -- `foo.bar!` : edit/define a command's source (authoring). Checked before the
+  -- run branches; `!` never appears in the run/args forms, and a prose `word!`
+  -- is guarded by a confirm before anything is created.
+  local nsbang = line:match("^%s*([%w_][%w_%.%-]*)!%s*$")
+  if nsbang and edit_namespace(nsbang) then
     return true
   end
 
