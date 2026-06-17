@@ -21,6 +21,13 @@ M.python = "python3"
 -- tool skeleton). Cosmetic extension only; dispatch stays shebang-driven.
 M.scaffold_lang = "sh"
 
+-- Exit code a namespace command returns to DECLARE its output a drillable menu:
+-- bsh renders it as a ```menu fence (not ```out, and the code isn't shown as an
+-- error), and plain <CR> on any of its lines re-runs the command with that line
+-- appended as one more arg (drill). 150 is outside the common 0-128 range; change
+-- it if it clashes with a real exit code your commands use.
+M.menu_exit = 150
+
 -- Yes/no gate before `foo.bar!` creates a NEW file (so a stray `word!` line can't
 -- silently scaffold). Overridable for customisation / tests; return true = go.
 function M.confirm(prompt)

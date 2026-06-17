@@ -6,8 +6,20 @@
 local M = {}
 
 local config = require("bsh.config")
-local run_shell = require("bsh.job").run_shell
+local job = require("bsh.job")
+local run_shell, shell_transform = job.run_shell, job.shell_transform
 local run_list = require("bsh.listing").run_list
+
+-- A namespace command can DECLARE its output a drillable menu by exiting with
+-- config.menu_exit (default 150): bsh then renders it as a ```menu fence whose
+-- every line is a valid next arg (plain <CR> drills). The transform treats that
+-- code as success (no `[exit N]` annotation); the retag flips the fence's tag.
+local function menu_transform(out, err, code)
+  return shell_transform(out, err, code == config.menu_exit and 0 or code)
+end
+local function menu_retag(code)
+  return code == config.menu_exit and "menu" or nil
+end
 
 -- The namespace root ($BSH_HOME, default ~/pockt/bsh). Returns "" when it
 -- doesn't exist, so namespace cells simply don't fire if it isn't set up (prose
@@ -19,28 +31,16 @@ function M.ns_home()
   return vim.fn.isdirectory(h) == 1 and h or ""
 end
 
--- Does `dotted` resolve to something under $BSH_HOME (a dir, a leaf file, or a
--- single-extension sibling)? A cheap path-only check -- no execution -- used to
--- decide whether a command's output fence should behave as a drillable menu.
-function M.resolves(dotted)
-  local home = M.ns_home()
-  if home == "" then return false end
-  local clean = (dotted:gsub("%.+$", ""))
-  if clean == "" then return false end
-  local base = home .. "/" .. (clean:gsub("%.", "/"))
-  if vim.fn.isdirectory(base) == 1 or vim.fn.filereadable(base) == 1 then return true end
-  return #vim.fn.glob(base .. ".*", false, true) > 0
-end
-
 -- Run a resolved namespace leaf as a SHELL command (not a bare argv), so the
 -- cell is a continuation of the shell: `args` is appended raw and the whole line
 -- goes through `$`'s one-shot shell, giving redirection, pipes, globs, `$(...)`
 -- sub-shells -- everything the outer shell does. The path is quoted; args are not
--- (they ARE shell syntax). Runs in the document's dir, like `$`.
+-- (they ARE shell syntax). Runs in the document's dir, like `$`. Menu-aware: an
+-- exit of config.menu_exit turns the output into a drillable ```menu fence.
 local function run_ns_exec(buf, trow, indent, path, args, to_buf)
   local cmd = vim.fn.shellescape(path)
   if args and args ~= "" then cmd = cmd .. " " .. args end
-  run_shell(buf, trow, indent, "", cmd, to_buf)
+  run_shell(buf, trow, indent, "", cmd, to_buf, { transform = menu_transform, retag = menu_retag })
 end
 
 -- A `namespace` cell resolves a dotted name to a path under $BSH_HOME (dots ->

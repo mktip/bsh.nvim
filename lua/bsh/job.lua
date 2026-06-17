@@ -37,7 +37,10 @@ end
 -- inline: replace the cell's owned fence body (at `mark`) with `lines`. A buffer
 -- sink (see buffer_sink) instead streams into a side buffer and updates a one-line
 -- reference. `final`/`code` are set only on the exit call.
-local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink)
+-- `retag(code) -> tag|nil` (inline only): on exit, may change the fence's opening
+-- delimiter to a different owned tag based on the exit code -- used so a command
+-- can DECLARE its output a `menu` (drillable) by its exit status.
+local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag)
   local acc, err_data = "", {}
   local n = 1 -- how many body lines we currently occupy (starts: the placeholder)
   -- replace our [row, row+n) body region with `lines`; returns the new n.
@@ -74,6 +77,16 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
       vim.schedule(function()
         local final = transform(split_out(), err_data, code)
         paint(#final > 0 and final or { "(no output)" }, true, code)
+        -- inline only: let the command re-tag its own fence by exit code (e.g.
+        -- exit 150 -> `menu`). The body extmark still resolves the body top, so
+        -- the opening delimiter is the line just above it.
+        if retag and not sink and vim.api.nvim_buf_is_valid(buf) then
+          local newtag = retag(code)
+          local pos = newtag and vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
+          if pos and pos[1] and pos[1] > 0 then
+            vim.api.nvim_buf_set_lines(buf, pos[1] - 1, pos[1], false, { indent .. "```" .. newtag })
+          end
+        end
         pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
         if inflight[buf] then inflight[buf][mark] = nil end
       end)
@@ -193,19 +206,23 @@ end
 -- in an `out` fence; with `to_buf` (<C-CR>), into a side buffer with a `log`
 -- reference fence. A cell that already owns a `log` fence stays routed there even
 -- on a plain <CR> (sticky), reusing that same buffer.
-local function run_shell(buf, trow, indent, target, cmd, to_buf)
+-- `opts` (optional): { transform, retag } -- the namespace path passes these so a
+-- command's exit code can declare its output a `menu` (see bsh.namespace).
+local function run_shell(buf, trow, indent, target, cmd, to_buf, opts)
+  opts = opts or {}
+  local transform = opts.transform or shell_transform
   local link = existing_log_link(buf, trow)
   if link then to_buf = true end -- sticky: keep an opted-in cell on its buffer
   local remote = target ~= ""
   local cwd = remote and nil or doc_cwd(buf)
   if to_buf then
     local mark, sink = begin_buffer_run(buf, trow, indent, link)
-    run_job(buf, indent, mark, build_argv(target, cmd), cwd, shell_transform, nil, sink)
+    run_job(buf, indent, mark, build_argv(target, cmd), cwd, transform, nil, sink)
     return
   end
   local mark = stage_fence(buf, trow, indent, "out",
     remote and ("...running on " .. target .. "...") or "...running...")
-  run_job(buf, indent, mark, build_argv(target, cmd), cwd, shell_transform)
+  run_job(buf, indent, mark, build_argv(target, cmd), cwd, transform, nil, nil, opts.retag)
 end
 
 -- A one-shot (`$`) run of an explicit argv (used for non-shell one-shots like

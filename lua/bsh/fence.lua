@@ -18,7 +18,7 @@ local inflight = M.inflight
 -- line as `<indent>```<tag>` (tag is "out" for shell, "dir" for listings).
 -- Returns the inclusive 0-indexed row range [start, stop) currently occupied by
 -- a fence (empty range = none yet, insert a fresh one right after the trigger).
-local OWNED_TAGS = { out = true, dir = true, tree = true, agent = true, log = true }
+local OWNED_TAGS = { out = true, dir = true, tree = true, agent = true, log = true, menu = true }
 function M.fence_range(buf, trow, indent, tag)
   local open = trow + 1
   local total = vim.api.nvim_buf_line_count(buf)
@@ -119,8 +119,14 @@ function M.foldtext()
   local indent = open:match("^(%s*)")
   local tag = open:match("```(%S+)") or "out"
   local n = vim.v.foldend - vim.v.foldstart - 1
-  local unit = tag == "dir" and (n == 1 and " entry)" or " entries)")
-    or (n == 1 and " line)" or " lines)")
+  local unit
+  if tag == "dir" then
+    unit = n == 1 and " entry)" or " entries)"
+  elseif tag == "menu" then
+    unit = n == 1 and " item)" or " items)"
+  else
+    unit = n == 1 and " line)" or " lines)"
+  end
   return indent .. "▸ " .. tag .. " (" .. n .. unit
 end
 

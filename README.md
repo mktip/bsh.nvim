@@ -68,17 +68,27 @@ thing `<CR>` runs *and* a tool registered for the `llm` CLI. See
 export BSH_HOME="$HOME/pockt/bsh"
 ```
 
-**Drillable menus.** A namespace command's output is a self-feeding menu:
-**`<C-CR>`** (or `g<CR>`) on an output line appends that line — as one quoted
-argument — to the trigger and re-runs it *in place*. So a `docker.list` that
-prints container ids becomes navigable: `<C-CR>` an id → `docker.list <id>`,
-which the script reinterprets as "drill into this one" and prints its actions;
-`<C-CR>` an action drills further. The trigger accumulates a breadcrumb
-(`docker.list <id> start`) you can edit or backspace to walk back up. It's on
-`<C-CR>` (not plain `<CR>`) because output is noisy — a stray `<CR>` shouldn't
-re-fire the command (plain `<CR>` still drives `dir`/`tree` listing nav, which is
-clean entry-per-line). See `examples/bsh-home/demo/menu.sh` for the ~6-line shape
-a menu command takes.
+**Drillable menus.** A namespace command can *declare* its output a self-feeding
+menu by **exiting `150`** (bsh's `menu_exit`). bsh then renders it as a `` ```menu ``
+fence — and **`<CR>` on any of its lines** appends that line, as one quoted
+argument, to the trigger and re-runs it *in place*. So a `docker.list` that prints
+container ids becomes navigable: `<CR>` an id → `docker.list <id>`, which the
+script reinterprets ("drill into this one") and prints its actions, exiting `150`
+again; `<CR>` an action drills further. A normal exit (`0`) is a terminal result
+(plain `` ```out ``), not drillable. The trigger accumulates a breadcrumb
+(`docker.list <id> start`) you can edit or backspace to walk back up.
+
+Because the command *opts in* by its exit code, plain `<CR>` is safe — no special
+gesture needed (`<C-CR>` keeps its only meaning, "send output to a side buffer").
+A menu command is ~6 lines of shell — see `examples/bsh-home/demo/menu.sh`:
+
+```sh
+case $# in
+  0) echo alpha; echo beta; exit 150 ;;                 # a menu
+  1) echo "$1 selected"; echo start; echo stop; exit 150 ;;
+  *) echo "$2 -> $1" ;;                                 # exit 0: a result
+esac
+```
 
 ## Install
 

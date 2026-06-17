@@ -278,40 +278,49 @@ Pick targets that show the namespace+listing model off, à la Xiki:
 
 ## Self-feeding menus (output line → next arg) — BUILT (2026-06-17)
 
-The drill idea above (`docker.list` → click a row → its actions) generalised into
-one rule, with **zero engine knowledge of any command**:
+The drill idea above (`docker.list` → pick a row → its actions) generalised into
+one rule. The command **declares** its output a menu *by its exit code*:
 
-> A namespace command's `out` fence is a menu. **`<C-CR>`** on a body line appends
-> that line — trimmed, as one shell-escaped argument — to the trigger and re-runs
-> it **in place**. The command inspects `"$@"` to decide list-vs-drill.
+> A namespace command that exits `config.menu_exit` (default **150**) has its
+> output rendered as a `` ```menu `` fence. **Plain `<CR>`** on a body line of a
+> `menu` fence appends that line — trimmed, as one shell-escaped argument — to the
+> trigger and re-runs it **in place**. The command inspects `"$@"` to decide
+> list-vs-drill, and `exit 150` again to stay a menu or `exit 0` to terminate.
 
-So `docker.list` is ~6 lines of bash (`case $# in 0) list;; 1) actions for $1;; *)
-act $2 on $1;; esac`). Each `<C-CR>` rewrites the trigger into a visible,
+So `docker.list` is ~6 lines of bash (`case $# in 0) list; exit 150;; 1) actions;
+exit 150;; *) act;; esac`). Each `<CR>` rewrites the trigger into a visible,
 editable **breadcrumb** (`docker.list <id> start`); backspacing an arg walks back
 up. This is the same oil-style trigger-rewrite already used for `dir` drilling,
 now applied to arbitrary command output — a zipper over a command tree.
 
 Decisions that shaped it (all settled with the user):
-- **Default for all namespace output**, no opt-in marker from the command. The
-  signal that an `out` fence is a menu is just that its trigger is a dotted name
-  that *resolves* under `$BSH_HOME` (`namespace.resolves`); `$`/`:`/url output
-  stays inert, so plain shell output isn't accidentally drillable.
+- **The command opts in by exit code, not the engine by heuristic.** Earlier this
+  guessed ("an `out` fence whose trigger *resolves* under `$BSH_HOME` is a menu");
+  the exit-code declaration is explicit and precise — a command that returns
+  ordinary output (exit 0) is never accidentally drillable. The `menu` fence *tag*
+  is the durable carrier of the declaration: it survives `:w`/reload with the
+  document, so no out-of-band state is needed, and detection at click time is just
+  "am I inside a `menu` fence". (This replaced the `namespace.resolves` predicate.)
+- **Plain `<CR>`, no gesture overload.** Because the command opted in, a `<CR>` on
+  a menu line can't mis-fire on noise, so it needn't be guarded behind `<C-CR>` —
+  which keeps its single meaning, "send output to a side buffer". `dir`/`tree`
+  listings keep their plain-`<CR>` nav too. The drill always renders **inline**
+  (the point is the in-place breadcrumb).
 - **Append the whole clicked line as one quoted arg** (`$1` = the line), not the
-  first token — the command author designs the menu and parses as it likes; most
-  power to the script, no engine magic.
-- **`<C-CR>`, not plain `<CR>`** — output is noisy; a stray `<CR>` must not
-  re-fire the command with a garbage arg. `dir`/`tree` listings (clean
-  entry-per-line) keep their plain-`<CR>` nav. The drill always renders **inline**
-  regardless of the gesture, since the point is the in-place breadcrumb rewrite.
+  first token — the author designs the menu and parses as they like; most power to
+  the script, no engine magic.
 - **The leap to a live shell isn't engine magic:** a script that sees `… shell`
   simply *emits a `$`/`user@host$` cell* as its output, which the next run picks
   up. Escalation is authored, not built in. (Engine-managed promotion stays a
   future option if scripting it proves clunky.)
 
-Impl: `out_fence_at` (init.lua) detects a click inside an `out` body;
-`namespace.resolves` gates it; `run_namespace(..., to_buf=false)` re-runs inline.
-Demo fixture: `examples/bsh-home/demo/menu.sh`. Tests: the two menu cases in
-`tests/test_namespace.lua`.
+Impl: a namespace run carries a `menu_transform` (treats `menu_exit` as success,
+no `[exit N]`) and a `retag` (`menu_exit → "menu"`); `run_job` re-tags the fence's
+opening delimiter on exit (inline only), so `` ```out `` flips to `` ```menu ``.
+`menu_fence_at` (init.lua) detects a `<CR>` inside a `menu` body and
+`run_namespace(..., to_buf=false)` re-runs inline. `menu` is an owned fence tag
+(`bsh.fence`). Demo fixture: `examples/bsh-home/demo/menu.sh`. Tests: the two menu
+cases in `tests/test_namespace.lua`.
 
 ## Output to a side buffer (a gesture, not a marker) — BUILT (2026-06-17)
 

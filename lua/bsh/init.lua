@@ -91,15 +91,16 @@ local function input_fence_at(buf, row)
   }
 end
 
--- If `row` sits inside an `out` fence's body, return its opening fence row
--- (0-indexed); else nil. Used to recognise a click on a line of a command's
--- output (for namespace menu-drilling). Bails on any other fence kind.
-local function out_fence_at(buf, row)
+-- If `row` sits inside a `menu` fence's body, return its opening fence row
+-- (0-indexed); else nil. A `menu` fence is produced when a namespace command
+-- exits config.menu_exit to DECLARE its output drillable (each line a next arg),
+-- so a plain <CR> on one of its lines is a safe drill. Bails on any other fence.
+local function menu_fence_at(buf, row)
   local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
   if gl(row):match("^%s*```") then return nil end -- on a fence delimiter, not a body line
   for r = row - 1, 0, -1 do
     local s = gl(r)
-    if s:match("^%s*```out%s*$") then return r end
+    if s:match("^%s*```menu%s*$") then return r end
     if s:match("^%s*```%S") then return nil end  -- some other opening fence
     if s:match("^%s*```%s*$") then return nil end -- a closer above -> outside any fence
   end
@@ -141,22 +142,22 @@ local function execute_cell(to_buf)
     return true
   end
 
-  -- <C-CR> inside a namespace command's `out` fence: DRILL. Append the clicked
-  -- line as one quoted arg to the (dotted) trigger and re-run IN PLACE, so the
-  -- command can reinterpret it (list -> drill into one). The trigger accumulates
-  -- a breadcrumb (`docker.list` -> `docker.list <id>` -> `… start`) you can edit
-  -- or backspace to walk back up. On <C-CR>/g<CR> only -- never plain <CR> --
-  -- because output lines are noisy and a stray <CR> shouldn't re-fire the command
-  -- (`dir`/`tree` fences keep plain-<CR> nav; they're clean entry-per-line). The
-  -- re-run is inline regardless of the gesture, since drilling rewrites in place.
-  if to_buf then
-    local mopen = out_fence_at(buf, trow)
+  -- Plain <CR> inside a `menu` fence: DRILL. The command DECLARED its output a
+  -- menu (by exiting config.menu_exit -> rendered as ```menu), so every line is a
+  -- valid next arg: append the clicked line (one quoted arg) to the dotted
+  -- trigger and re-run IN PLACE, so the command reinterprets it (list -> drill
+  -- into one). The trigger accumulates a breadcrumb (`docker.list` ->
+  -- `docker.list <id>` -> `… start`) you can edit or backspace to walk back up.
+  -- Plain <CR> is safe here precisely because the command opted in; <C-CR> stays
+  -- "open in a side buffer", so we only drill on a plain <CR> (not to_buf).
+  if not to_buf then
+    local mopen = menu_fence_at(buf, trow)
     if mopen then
       local trig = vim.api.nvim_buf_get_lines(buf, mopen - 1, mopen, false)[1] or ""
       local tindent = trig:match("^(%s*)")
       local nsname = vim.trim(trig):match("^([%w_][%w_%.%-]*)")
       local clicked = vim.trim(line)
-      if nsname and clicked ~= "" and namespace.resolves(nsname) then
+      if nsname and clicked ~= "" then
         local newtrig = vim.trim(trig) .. " " .. vim.fn.shellescape(clicked)
         vim.api.nvim_buf_set_lines(buf, mopen - 1, mopen, false, { tindent .. newtrig })
         local nm, ar = newtrig:match("^([%w_][%w_%.%-]*)%s+(.+)$")

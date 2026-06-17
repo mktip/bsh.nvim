@@ -53,25 +53,27 @@ T["tag change replaces the old fence (no orphan)"] = function()
   eq(H.lines(child), { "llm.tools.", "```dir", "../", "reverse.py", "weather.py", "```" })
 end
 
-T["a command's output is a drillable menu on <C-CR> (append-as-arg)"] = function()
+T["exit-150 output becomes a ```menu fence, drillable on plain <CR>"] = function()
   H.bootstrap(child, { lines = { "demo.menu" } })
-  H.run(child, 1) -- plain <CR>: list
-  eq(H.lines(child), { "demo.menu", "```out", "alpha", "beta", "```" })
+  H.run(child, 1) -- exits 150 -> declared a menu (no `[exit 150]` shown)
+  eq(H.lines(child), { "demo.menu", "```menu", "alpha", "beta", "```" })
 
-  -- <C-CR> on `alpha`: trigger gains the arg and re-runs in place -> sub-menu
-  H.run(child, H.rowof(child, "^alpha$"), true)
-  eq(H.lines(child), { "demo.menu 'alpha'", "```out", "alpha selected", "start", "stop", "```" })
+  -- plain <CR> on `alpha`: trigger gains the arg and re-runs in place -> sub-menu
+  H.run(child, H.rowof(child, "^alpha$"))
+  eq(H.lines(child), { "demo.menu 'alpha'", "```menu", "alpha selected", "start", "stop", "```" })
 
-  -- drill again: <C-CR> on `start` appends a second arg
-  H.run(child, H.rowof(child, "^start$"), true)
+  -- drill again on `start`: a second arg, and this time the command exits 0 ->
+  -- a terminal `out` fence (no longer a menu)
+  H.run(child, H.rowof(child, "^start$"))
   eq(H.lines(child), { "demo.menu 'alpha' 'start'", "```out", "start -> alpha", "```" })
 end
 
-T["plain <CR> on a menu line does NOT drill (only <C-CR>)"] = function()
-  H.bootstrap(child, { lines = { "demo.menu" } })
+T["a non-menu (exit 0) command's `out` lines are inert on <CR>"] = function()
+  H.bootstrap(child, { lines = { "llm.tools.reverse hi" } })
   H.run(child, 1)
-  H.run(child, H.rowof(child, "^alpha$")) -- plain <CR>: no-op drill, output unchanged
-  eq(H.lines(child), { "demo.menu", "```out", "alpha", "beta", "```" })
+  eq(H.lines(child), { "llm.tools.reverse hi", "```out", "ih", "```" })
+  H.run(child, H.rowof(child, "^ih$")) -- not a menu fence: <CR> doesn't drill
+  eq(H.lines(child), { "llm.tools.reverse hi", "```out", "ih", "```" })
 end
 
 T["foo.bar! scaffolds an executable leaf, then it runs"] = function()
