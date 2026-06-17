@@ -319,18 +319,24 @@ on disk and must not be persisted preemptively** — huge / infinite / sensitive
   ```
   ```
 
-- **Link = handle, not path:** rides the output extmark (extmark id → bufnr).
-  Session-lived; reopen in a fresh nvim and it's gone — fine for logs (the fence
-  can show "(closed)").
-- **Sticky routing via the `log` fence (the memory):** the ` ```log ` fence tag
-  *is* the per-cell memory — if a cell already owns a `log` fence, a plain `<CR>`
-  keeps routing to its buffer (a dev server you re-run keeps going to its buffer)
-  without touching the trigger line. Delete the fence to revert to inline. So
-  `<C-CR>` opts a cell in once; it stays in.
+- **The link lives in the fence text** (not a fragile in-memory map): the
+  `bsh://out/<doc>/<n>` **buffer name** written in the ` ```log ` body *is* the
+  handle — `vim.fn.bufnr("bsh://out/…")` recovers it. The fence is the source of
+  truth.
+- **Create a buffer only if the fence doesn't already link a live one** (the
+  reuse rule the mechanism turns on): on (re-)run, read the cell's existing owned
+  fence; if it's a `log` fence whose linked buffer is still valid, **reuse** it
+  (clear the ring, stream in) — do **not** spawn a new buffer. Only mint a fresh
+  `bsh://out/<doc>/<n>` when there's no link or the linked buffer is gone. So
+  re-running a `tail -f` / dev-server cell keeps hitting the same buffer instead
+  of littering new ones.
+- **Sticky routing falls out of the same fact:** because the `log` fence carries
+  the link, a plain `<CR>` on a cell that already owns one keeps routing to that
+  buffer (no need to re-`<C-CR>`); the trigger line is never touched. Delete the
+  fence to revert to inline. So `<C-CR>` opts a cell in once; it stays in.
 - **Persist on demand only:** `:w` in the side buffer (or a keymap on the
-  reference) writes to `$XDG_CACHE_HOME/bsh/…` and rewrites the fence to a real
-  `bsh:file:<path>` that survives reopen. Disk is opt-in.
-- **Idempotent re-run:** clears the ring and reuses the buffer.
+  reference) writes to `$XDG_CACHE_HOME/bsh/…` and rewrites the fence link to a
+  real `bsh:file:<path>` that survives reopen. Disk is opt-in.
 - **Lifecycle:** killing the doc/cell stops the job (inflight jobs + BufWipeout →
   stop_session already); wiping the side buffer stops it too.
 
