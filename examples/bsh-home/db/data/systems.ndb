@@ -1,0 +1,17 @@
+# mktip's machines. `dom` is the tailscale MagicDNS name (what you ssh to inside
+# the tailnet); `user=` (where set) prefixes the emitted `<user>@<dom>$$` cell.
+# Schema-less as ever: mkti-ps carries an extra fqdn, the laptop a note, etc.
+
+sys=simurgh-base dom=simurgh-base user=mktips
+	os=fedora role=desktop loc=home
+	note=home-pc
+
+sys=mobile-base dom=mobile-base user=mktips
+	os=fedora role=laptop loc=mobile
+	note=this-machine
+
+sys=university-base dom=university-base
+	os=freebsd role=server loc=university
+
+sys=mkti-ps dom=mkti-ps fqdn=mkti.ps
+	os=freebsd role=server

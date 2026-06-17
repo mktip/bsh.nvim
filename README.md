@@ -178,10 +178,20 @@ db hosts role=fileserver service=nfs   → AND-narrowed (the breadcrumb is a fil
 ```
 
 Every menu line is a valid `attr=value` term; `<CR>` appends it (AND) and re-runs,
-backspace the breadcrumb to widen. Matching uses the real ndb engine
-(`ndbquery`), so install [plan9port](https://github.com/9fans/plan9port) and put
-its `ndbquery` on `PATH`. Point `$BSH_NDB` at your ndb tree (defaults to the demo
-data beside the command). See `examples/bsh-home/db/`.
+backspace the breadcrumb to widen. And a resolved entry with a `dom`/`ip` offers a
+`connect: <addr>` line — `<CR>` on it **emits a `<addr>$$` session cell** (a live
+shell on that host), so the database connects you to what it describes:
+
+```
+db systems sys=simurgh-base
+  → … dom=simurgh-base  user=mktips  …  connect: mktips@simurgh-base
+                                          └ <CR> ⇒ mktips@simurgh-base$$  (a shell there)
+```
+
+Matching uses the real ndb engine (`ndbquery`), so install
+[plan9port](https://github.com/9fans/plan9port) and put its `ndbquery` on `PATH`.
+Point `$BSH_NDB` at your ndb tree (defaults to the demo data beside the command).
+See `examples/bsh-home/db/`.
 
 ## Install
 

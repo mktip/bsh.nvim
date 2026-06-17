@@ -287,10 +287,14 @@ Pick targets that show the namespace+listing model off, à la Xiki:
   the rest by exact-token match; listing/primary-pair extraction is a tiny awk ndb
   parser (entries start in col 1, continuations indented, blank/`#` ignored). Pure
   dogfood of the menu(150)+drill model — no new engine code, just a script + sample
-  data (`db/data/hosts.ndb`, deliberately heterogeneous). Data dir = `$BSH_NDB` or
-  `./data`. Tested (`tests/test_db.lua`, auto-skips without `ndbquery`). NOT yet: an
-  emit-a-cell action (an entry's `dom`/`ip` → a `<host>$$` session cell — the db→
-  route→session payoff), write/edit, multiple db files in the sample.
+  data (`db/data/{hosts,systems}.ndb`, deliberately heterogeneous). Data dir =
+  `$BSH_NDB` or `./data`. **The db→route→session payoff is BUILT:** a resolved entry
+  with a `dom`/`ip` (and optional `user=`) offers a `connect: <addr>` line whose
+  `<CR>` exits 151 to emit a `<addr>$$` session cell — so `db` walks you from a
+  record straight into a live shell on the machine it describes. (`systems.ndb`
+  carries mktip's real boxes by their tailscale MagicDNS names.) Tested
+  (`tests/test_db.lua`, incl. the connect→emit-cell, auto-skips without `ndbquery`).
+  NOT yet: write/edit (`db.add`, edit an entry).
 - **`git.*` — small sharp commands**: `git.undo` (soft-reset last commit, keep
   changes), `git.wip`, `git.sync`. Great with the `bsh`-in-a-session cwd story.
 - Others that fit: `http.get <url>`, `json.*`, `notes.*`, `docker.*`.

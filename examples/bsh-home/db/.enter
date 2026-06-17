@@ -10,8 +10,10 @@
 #   db hosts role=fileserver service=nfs   -> AND-narrowed (a filter stack)
 #
 # Each menu line is a valid `attr=value` filter term; <CR> appends it (AND) and
-# re-runs, backspace the breadcrumb to widen. ndb files live in ./data (override
-# with $BSH_NDB).
+# re-runs, backspace the breadcrumb to widen. A resolved entry that has a `dom`
+# (or `ip`) also offers a `connect: <addr>` line: <CR> on it EMITS a `<addr>$$`
+# session cell (exit 151) -- so the database connects you to what it describes.
+# ndb files live in ./data (override with $BSH_NDB).
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -33,6 +35,15 @@ fi
 file=$1; shift
 db="$datadir/$file.ndb"
 [ -f "$db" ] || { echo "no ndb file '$file' in $datadir"; exit 1; }
+
+# A `connect: <addr>` action was drilled from a field view -> hand back a session
+# cell for that host (exit 151, emit-a-cell). Detected before the filter logic so
+# the rest of the breadcrumb (the filter terms) is irrelevant -- we know the addr.
+for a in "$@"; do
+  case "$a" in
+    "connect: "*) printf '%s$$ \n' "${a#connect: }"; exit 151 ;;
+  esac
+done
 
 # Each entry's primary (first) pair. ndb entries start in column 1; continuation
 # lines are indented; blank / # lines are ignored.
@@ -75,7 +86,17 @@ if [ "$count" -eq 0 ]; then
   exit 0
 elif [ "$count" -eq 1 ]; then
   # exactly one entry: explode its pairs into drillable field lines.
-  printf '%s\n' "$matches" | tr ' ' '\n' | sed '/^[[:space:]]*$/d'
+  pairs=$(printf '%s\n' "$matches" | tr ' ' '\n' | sed '/^[[:space:]]*$/d')
+  printf '%s\n' "$pairs"
+  # offer a connect action if it has somewhere to connect to (dom preferred, else
+  # ip), prefixed with user= if the entry carries one.
+  addr=$(printf '%s\n' "$pairs" | sed -n 's/^dom=//p' | head -1)
+  [ -n "$addr" ] || addr=$(printf '%s\n' "$pairs" | sed -n 's/^ip=//p' | head -1)
+  if [ -n "$addr" ]; then
+    user=$(printf '%s\n' "$pairs" | sed -n 's/^user=//p' | head -1)
+    [ -n "$user" ] && addr="$user@$addr"
+    echo "connect: $addr"
+  fi
   exit 150
 else
   # several entries: show each by its primary pair, so drilling narrows.

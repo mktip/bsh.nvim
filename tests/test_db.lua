@@ -15,7 +15,18 @@ end
 T["db lists the ndb files as a menu"] = function()
   H.bootstrap(child, { name = "db.bsh", lines = { "db" } })
   H.run(child, 1)
-  eq(H.lines(child), { "db", "```menu", "hosts", "```" })
+  eq(H.lines(child), { "db", "```menu", "hosts", "systems", "```" })
+end
+
+T["a resolved entry offers a connect action that emits a session cell"] = function()
+  H.bootstrap(child, { name = "db.bsh", lines = { "db systems sys=simurgh-base" } })
+  H.run(child, 1) -- one entry -> its fields + a connect: line
+  eq(H.rowof(child, "^connect: mktips@simurgh%-base$") ~= nil, true)
+
+  -- drill the connect line: exit 151 emits a `<user>@<dom>$$ ` session cell that
+  -- REPLACES the trigger (the db→route→session payoff).
+  H.run(child, H.rowof(child, "^connect: "))
+  eq(H.lines(child), { "mktips@simurgh-base$$ " })
 end
 
 T["drill a file -> entries; drill an entry -> its fields"] = function()
