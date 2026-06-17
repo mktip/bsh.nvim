@@ -166,6 +166,23 @@ containers (a menu), and `<CR>` on one emits a `` docker@<id>$$ `` **session cel
 | `docker.list` | menu of *all* containers → actions: `shell` / `start` / `stop` / `restart` / `rm` |
 | `docker.create [name]` | spin up an alpine box (kept alive) → emits its `docker@<name>$$` shell |
 
+**`db.*` — a faceted [ndb](https://9p.io/sys/doc/9.html) (Plan 9 database) browser.**
+ndb is *schema-less* — an entry is just a bag of `attr=value` pairs, no two entries
+need the same keys — so the browser is all menus and filters, never columns:
+
+```
+db                       → a menu of your .ndb files
+db hosts                 → every entry, by its primary pair (sys=gate, sys=server, …)
+db hosts sys=server      → that entry's fields, each a drillable facet
+db hosts role=fileserver service=nfs   → AND-narrowed (the breadcrumb is a filter stack)
+```
+
+Every menu line is a valid `attr=value` term; `<CR>` appends it (AND) and re-runs,
+backspace the breadcrumb to widen. Matching uses the real ndb engine
+(`ndbquery`), so install [plan9port](https://github.com/9fans/plan9port) and put
+its `ndbquery` on `PATH`. Point `$BSH_NDB` at your ndb tree (defaults to the demo
+data beside the command). See `examples/bsh-home/db/`.
+
 ## Install
 
 Requires Neovim 0.9+. Python cells need `python3`; agent cells need

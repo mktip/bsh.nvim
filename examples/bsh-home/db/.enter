@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# db — browse a Plan 9 ndb database by faceted drill, using ndb AS IT IS (the real
+# `ndbquery` matcher; install plan9port). ndb is schema-less: an entry is just a
+# bag of attr=value pairs, no two entries need the same keys — so the browser is
+# all menus and filters, never columns.
+#
+#   db                         <CR> -> a menu of the .ndb files          (exit 150)
+#   db hosts                   <CR> -> every entry, by its primary pair   (exit 150)
+#   db hosts sys=server        <CR> -> that entry's fields (each drillable)(exit 150)
+#   db hosts role=fileserver service=nfs   -> AND-narrowed (a filter stack)
+#
+# Each menu line is a valid `attr=value` filter term; <CR> appends it (AND) and
+# re-runs, backspace the breadcrumb to widen. ndb files live in ./data (override
+# with $BSH_NDB).
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+datadir=${BSH_NDB:-$here/data}
+
+# 0 args: list the available ndb files as a drillable menu.
+if [ $# -eq 0 ]; then
+  found=0
+  for f in "$datadir"/*.ndb; do
+    [ -e "$f" ] || continue
+    b=${f##*/}
+    echo "${b%.ndb}"
+    found=1
+  done
+  [ "$found" = 1 ] || { echo "(no .ndb files in $datadir)"; exit 0; }
+  exit 150
+fi
+
+file=$1; shift
+db="$datadir/$file.ndb"
+[ -f "$db" ] || { echo "no ndb file '$file' in $datadir"; exit 1; }
+
+# Each entry's primary (first) pair. ndb entries start in column 1; continuation
+# lines are indented; blank / # lines are ignored.
+primaries() {
+  awk '
+    /^[ \t]*#/ { next }
+    /^[ \t]*$/ { next }
+    /^[^ \t]/  { print $1 }
+  ' "$db"
+}
+
+# No filter terms yet: list every entry by its primary pair.
+if [ $# -eq 0 ]; then
+  primaries
+  exit 150
+fi
+
+# Filter terms are attr=value, ANDed. Seed the match with the REAL ndb matcher on
+# the first term (`ndbquery -a` -> one line per matching entry, all pairs), then
+# AND the remaining terms by exact-token match on those lines.
+seed=$1; shift
+attr=${seed%%=*}
+val=${seed#*=}
+
+matches=$(ndbquery -f "$db" -a "$attr" "$val" 2>/dev/null | while IFS= read -r line; do
+  keep=1
+  for term in "$@"; do
+    case " $line " in
+      *" $term "*) ;;
+      *) keep=0; break ;;
+    esac
+  done
+  [ "$keep" = 1 ] && printf '%s\n' "$line"
+done | sed '/^[[:space:]]*$/d')
+
+count=$(printf '%s' "$matches" | grep -c . || true)
+
+if [ "$count" -eq 0 ]; then
+  echo "(no match)"
+  exit 0
+elif [ "$count" -eq 1 ]; then
+  # exactly one entry: explode its pairs into drillable field lines.
+  printf '%s\n' "$matches" | tr ' ' '\n' | sed '/^[[:space:]]*$/d'
+  exit 150
+else
+  # several entries: show each by its primary pair, so drilling narrows.
+  printf '%s\n' "$matches" | awk '{ print $1 }'
+  exit 150
+fi

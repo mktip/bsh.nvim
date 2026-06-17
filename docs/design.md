@@ -276,9 +276,21 @@ repo-relative through `bsh` in a session.
 ### Flagship tool use cases (to dogfood + demo)
 
 Pick targets that show the namespace+listing model off, à la Xiki:
-- **`db.*` — a database browser/query** (Xiki was loved for this). `db.prod`
-  lists tables → `db.prod.users` lists/queries rows into a `dir`/table fence →
-  drill a row to expand it. Maps perfectly onto dotted-namespace + drill-in.
+- **`db.*` — a faceted ndb browser — BUILT (2026-06-18).** NOT a SQL db: it browses
+  **ndb** (Plan 9's database), chosen precisely because it's *schema-less* (an entry
+  is a bag of `attr=value` pairs; no two entries need the same keys — user's
+  preference: no schema to declare). `examples/bsh-home/db/.enter`: `db` → menu of
+  `.ndb` files → `db hosts` → entries by primary pair → `db hosts attr=value` →
+  faceted **AND**-filter (each drilled field is another term on a breadcrumb filter
+  stack; backspace widens), resolving to a single entry's fields (each a drillable
+  facet). Matching uses the real `ndbquery` (plan9port) for the first term, ANDing
+  the rest by exact-token match; listing/primary-pair extraction is a tiny awk ndb
+  parser (entries start in col 1, continuations indented, blank/`#` ignored). Pure
+  dogfood of the menu(150)+drill model — no new engine code, just a script + sample
+  data (`db/data/hosts.ndb`, deliberately heterogeneous). Data dir = `$BSH_NDB` or
+  `./data`. Tested (`tests/test_db.lua`, auto-skips without `ndbquery`). NOT yet: an
+  emit-a-cell action (an entry's `dom`/`ip` → a `<host>$$` session cell — the db→
+  route→session payoff), write/edit, multiple db files in the sample.
 - **`git.*` — small sharp commands**: `git.undo` (soft-reset last commit, keep
   changes), `git.wip`, `git.sync`. Great with the `bsh`-in-a-session cwd story.
 - Others that fit: `http.get <url>`, `json.*`, `notes.*`, `docker.*`.
