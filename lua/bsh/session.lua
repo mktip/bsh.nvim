@@ -13,6 +13,17 @@ local doc_cwd, existing_log_link, begin_buffer_run = job.doc_cwd, job.existing_l
 
 local sessions = {} -- [buf] = { [lang] = { job, spec, token, acc, busy, current, queue } }
 
+-- A separate extmark namespace for the cwd prompt badge (eol virt_text on a `$$`
+-- cell's prompt line), so it never tangles with the fence/inflight machinery.
+local promptns = vim.api.nvim_create_namespace("bsh_prompt")
+
+-- The persistent login shell a remote/transport `sh` session terminates in. Run
+-- through the SAME route engine as one-shots (job.build_argv), so a `$$` session
+-- composes over any transport -- `docker@id$$`, `web@prod/docker@api$$` -- exactly
+-- like a `$`. `exec ${SHELL:-/bin/sh} -l` replaces the hop's wrapper `sh -lc` with
+-- a login shell reading the (kept-open) stdin, which is what makes it persistent.
+local SESSION_SH = "exec ${SHELL:-/bin/sh} -l"
+
 -- Python driver run as `python -u -c <this>`; @TOKEN@ is substituted per session.
 -- Reads LENGTH-PREFIXED code chunks and execs each into a persistent globals dict
 -- (length-framing makes multiline/indentation a non-issue), printing the sentinel
@@ -48,17 +59,22 @@ while True:
 -- sentinel; the streaming/parsing in sess_start is shared.
 local SPECS = {
   sh = {
-    -- local: a login shell (env loads once). remote (`user@host$$`): the SAME
-    -- shell over ssh, so a persistent remote session works exactly like a local
-    -- one (env loads via the remote login shell). -T = no pty; cmds on stdin.
+    -- local: a login shell (env loads once). remote/transport (`user@host$$`,
+    -- `docker@id$$`, `web@prod/docker@api$$`): the SAME login shell, reached
+    -- through the route engine -- so a persistent session works over anything a
+    -- one-shot does. cmds arrive on the kept-open stdin (no pty).
     argv = function(_, target)
       if target == "" then return { vim.o.shell, "-l" } end
-      return { "ssh", "-T", target, "exec ${SHELL:-/bin/sh} -l" }
+      return job.build_argv(target, SESSION_SH)
     end,
     init = function(s) vim.fn.chansend(s.job, "exec 2>&1\n") end,
+    -- The sentinel carries BOTH the exit code AND `$PWD` -- so we learn the
+    -- session's cwd by reading the shell itself (never by parsing `cd`, which a
+    -- dynamic path or a subshell would defeat). The pwd field is parsed back in
+    -- sess_start and surfaced as the cwd badge.
     send = function(s, code)
       vim.fn.chansend(s.job, code ..
-        "\nprintf '\\n__BSH_" .. s.token .. "__:%d\\n' \"$?\"\n")
+        "\nprintf '\\n__BSH_" .. s.token .. "__:%d:%s\\n' \"$?\" \"$PWD\"\n")
     end,
   },
   python = {
@@ -76,6 +92,21 @@ local function skey(lang, target)
   return target ~= "" and (lang .. "@" .. target) or lang
 end
 
+-- Render the cwd prompt badge for a just-finished `sh` `$$` cell: eol virt_text
+-- on its prompt line (`row`, 0-indexed), reading like the shell prompt it mirrors
+-- -- `web@prod:/var/log` remote, just the path locally. We clear the row's prior
+-- badge first so re-running a cell replaces rather than stacks.
+local function set_prompt_badge(buf, row, target, cwd)
+  if not (row and cwd and cwd ~= "" and vim.api.nvim_buf_is_valid(buf)) then return end
+  if row < 0 or row >= vim.api.nvim_buf_line_count(buf) then return end
+  local label = (target ~= "" and (target .. ":") or "") .. cwd
+  pcall(vim.api.nvim_buf_clear_namespace, buf, promptns, row, row + 1)
+  pcall(vim.api.nvim_buf_set_extmark, buf, promptns, row, 0, {
+    virt_text = { { "  " .. label, "Comment" } },
+    virt_text_pos = "eol",
+  })
+end
+
 local function sess_pump(buf, key)
   local s = sessions[buf] and sessions[buf][key]
   if not s or s.busy then return end
@@ -88,7 +119,7 @@ end
 local function sess_start(buf, lang, target)
   local spec = SPECS[lang]
   local key = skey(lang, target)
-  local s = { lang = lang, spec = spec, acc = "", busy = false, queue = {},
+  local s = { lang = lang, target = target, spec = spec, acc = "", busy = false, queue = {},
               token = string.format("%08x", math.random(0, 0xffffffff)) }
   local jb = vim.fn.jobstart(spec.argv(s.token, target), {
     cwd = doc_cwd(buf),
@@ -96,7 +127,9 @@ local function sess_start(buf, lang, target)
       if not data then return end
       s.acc = s.acc .. table.concat(data, "\n")
       while true do
-        local a, b, rc = s.acc:find("\n__BSH_" .. s.token .. "__:(%d+)\r?\n")
+        -- sentinel: `__BSH_<token>__:<rc>[:<pwd>]`. The pwd field is sh-only (the
+        -- `:?` makes it optional so the python driver's `:<rc>` sentinel matches too).
+        local a, b, rc, pwd = s.acc:find("\n__BSH_" .. s.token .. "__:(%d+):?([^\r\n]*)\r?\n")
         if not a then break end
         local body = s.acc:sub(1, a - 1) -- everything before the sentinel line
         s.acc = s.acc:sub(b + 1)
@@ -106,6 +139,10 @@ local function sess_start(buf, lang, target)
           local lines = vim.split(body:gsub("\r", ""), "\n", { plain = true })
           while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
           if tonumber(rc) ~= 0 then lines[#lines + 1] = "[exit " .. rc .. "]" end
+          if pwd ~= "" then -- shell told us where it is now -> refresh the cwd badge
+            s.cwd = pwd
+            set_prompt_badge(buf, item.prow, s.target, pwd)
+          end
           if item.sink then -- <C-CR>: output to a side buffer, not the doc fence
             item.sink(lines, true, tonumber(rc))
             pcall(vim.api.nvim_buf_del_extmark, buf, ns, item.mark)
@@ -133,7 +170,10 @@ end
 -- (nothing to navigate inside it), so the only difference from `$` is that the
 -- session fills once on unit completion rather than streaming, so we hand the
 -- buffer sink to the queue item and the pump calls it instead of `fill_fence`.
-function M.run_session(buf, lang, target, trow, indent, cmd, to_buf)
+-- `prow` (0-indexed, optional) is the cell's PROMPT line -- the `$$`/```$$` line
+-- the badge attaches to. Only `sh` sessions surface a cwd badge (it rides the
+-- shell's `$PWD`); a nil `prow` just skips it.
+function M.run_session(buf, lang, target, trow, indent, cmd, to_buf, prow)
   local key = skey(lang, target)
   if not (sessions[buf] and sessions[buf][key]) then
     if not sess_start(buf, lang, target) then
@@ -146,10 +186,10 @@ function M.run_session(buf, lang, target, trow, indent, cmd, to_buf)
   local item
   if to_buf then
     local mark, sink = begin_buffer_run(buf, trow, indent, link)
-    item = { cmd = cmd, mark = mark, indent = indent, sink = sink }
+    item = { cmd = cmd, mark = mark, indent = indent, sink = sink, prow = prow }
   else
     local mark = stage_fence(buf, trow, indent, "out", "...running (session)...")
-    item = { cmd = cmd, mark = mark, indent = indent }
+    item = { cmd = cmd, mark = mark, indent = indent, prow = prow }
   end
   table.insert(sessions[buf][key].queue, item)
   sess_pump(buf, key)

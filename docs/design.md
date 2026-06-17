@@ -363,12 +363,42 @@ target + config) for local / ssh / `remote_login=false` / docker / unregistered
 scheme / user transport / function transport / docker-over-ssh nesting — so they
 need no ssh/docker/jail present.
 
-**Not yet (next slices):** sessions over transports (`docker@api$$` as a persistent
-container shell), the `pwd`-in-sentinel **cwd prompt** for sessions (the only
-reliable cwd signal — read the shell, never parse `cd`), and a `docker.list`
-namespace command that drills a container id into a `docker@id$$` session cell
-(ties the route grammar to the menu model). VM **consoles** (PTY) stay with the
-parked interactivity work; the ssh-style `vm` template covers the exec case now.
+## Sessions over transports + the cwd prompt — BUILT (2026-06-18, slice 2)
+
+A `$$` session is no longer ssh-or-local: its argv goes through the **same**
+`build_argv` route as a one-shot, terminating in a persistent login shell
+(`exec ${SHELL:-/bin/sh} -l`) reached at the route's end. So `docker@id$$`,
+`web@prod/docker@api$$`, `jail@www$$` — anything the route grammar can express —
+is a persistent shell where `export`/`cd`/venv carry across cells, exactly like a
+local `$$`. One change in `bsh.session`'s `sh` spec; the streaming/sentinel
+machinery was already transport-agnostic. (Live-verified: a real `ssh→docker`
+session carried a var across two cells inside the container.)
+
+The wrapping is a double login shell for ssh (`sh -lc 'exec … -l'`) — harmless,
+`exec` replaces the process, and it keeps the engine uniform (no session-special
+hop logic). `python $$` is unchanged (no transport; its driver argv is local).
+
+**The cwd prompt (read the shell, never parse `cd`).** The `sh` session's sentinel
+now carries `$PWD` alongside the exit code (`__BSH_<tok>__:<rc>:<pwd>`), so we
+learn the cwd from the shell *itself* — robust to dynamic paths, subshells, and
+`cd -`, which static parsing of the trigger could never be. Each finished `$$`
+cell gets an **eol virt_text badge** on its prompt line reading like the prompt it
+mirrors: `web@prod:/var/log` remote, just the path locally. It's a separate
+extmark namespace (`bsh_prompt`), so it never tangles with the fence/inflight
+marks, and re-running a cell replaces its badge rather than stacking. The python
+sentinel stays `:<rc>` (the pwd field is optional in the parse: `:?`).
+
+Tests: `tests/test_session.lua` — env carries across cells; the badge tracks
+`$PWD` after a `cd`; and a session composes over a user-defined transport (a `loc`
+transport that runs a shell locally, so the route path is exercised end-to-end
+without a network).
+
+**Not yet (next slice):** a `docker.list` namespace command that drills a
+container id into a `docker@id$$` session cell (ties the route grammar to the menu
+model). VM **consoles** (PTY) stay with the parked interactivity work; the
+ssh-style `vm` template covers the exec case now. The `:`/`$$` cwd story is now
+closed for sessions — the badge is the prompt the earlier sketch wanted, without
+rewriting the user's line.
 
 ## Output to a side buffer (a gesture, not a marker) — BUILT (2026-06-17)
 

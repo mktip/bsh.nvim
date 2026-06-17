@@ -127,7 +127,7 @@ local function execute_cell(to_buf)
   if fc then
     if fc.lang == "sh" then
       if fc.session then -- local or remote (`user@host$$`) persistent shell
-        run_session(buf, "sh", fc.target, fc.close, fc.indent, fc.body, to_buf)
+        run_session(buf, "sh", fc.target, fc.close, fc.indent, fc.body, to_buf, fc.open)
       else
         run_shell(buf, fc.close, fc.indent, fc.target, fc.body, to_buf)
       end
@@ -135,7 +135,7 @@ local function execute_cell(to_buf)
       vim.notify("bsh: remote " .. fc.lang .. " cells aren't supported yet",
         vim.log.levels.WARN)
     elseif fc.session then
-      run_session(buf, fc.lang, "", fc.close, fc.indent, fc.body, to_buf)
+      run_session(buf, fc.lang, "", fc.close, fc.indent, fc.body, to_buf, fc.open)
     else -- one-shot interpreter run
       run_oneshot(buf, fc.close, fc.indent, { config.python, "-c", fc.body }, to_buf)
     end
@@ -174,7 +174,7 @@ local function execute_cell(to_buf)
   local stgt, sdbl, scmd = line:match("^%s*(%S-)(%$%$?)%s+(.+)$")
   if scmd then
     if sdbl == "$$" then
-      run_session(buf, "sh", stgt, trow, indent, scmd, to_buf)
+      run_session(buf, "sh", stgt, trow, indent, scmd, to_buf, trow)
     else
       run_shell(buf, trow, indent, stgt, scmd, to_buf)
     end
