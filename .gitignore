@@ -10,3 +10,6 @@
 # test scratch
 /tmp/
 *.log
+
+# test deps (vendored mini.nvim)
+/deps/

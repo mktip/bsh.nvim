@@ -81,6 +81,19 @@ Requires Neovim 0.9+. Python cells need `python3`; agent cells need
 `bsh` attaches automatically to `*.bsh` files. Turn any buffer into a shell on
 demand with `:Bsh!`; `:Bsh` opens a fresh scratch one.
 
+## Development
+
+Tests use [mini.test](https://github.com/echasnovski/mini.nvim) (child-Neovim,
+buffer-state assertions). `make test` fetches mini.nvim into `deps/` on first run
+and executes the suite headless:
+
+```sh
+make test
+```
+
+Specs live in `tests/` (`test_*.lua`); `tests/helpers.lua` wraps the
+"set up a lab buffer, run a cell, read it back" dance.
+
 ## Status
 
 Built and in daily use; the roadmap leans toward **typesetting** a session —
