@@ -33,13 +33,16 @@ kept filesystem-backed instead of in-memory.
 
 ## Already built (pointers, not spec)
 
-Inline + fenced cells, all idempotent / async / streaming:
+Inline + fenced cells, all idempotent / async / streaming. The run marker is a
+single config variable (`config.marker`, default `%`, doubled `%%` for a
+session) threaded through every parser and emitter — set it to `$` for the
+classic look. The docs use `%`.
 
-- `$ cmd` one-shot shell; `user@host$ cmd` remote (login shell over ssh).
-- `$$ cmd` persistent **session** (shared env/cwd/vars), local or `user@host$$`
+- `% cmd` one-shot shell; `user@host% cmd` remote (login shell over ssh).
+- `%% cmd` persistent **session** (shared env/cwd/vars), local or `user@host%%`
   remote; sessions are keyed per buffer by `(language, target)`.
-- Multiline **input fences**: ` ```$ ` / ` ```$$ ` / ` ```python $ ` / ` ```python $$ `.
-  Rule: a trailing `$` = run once, `$$` = shared session, no marker = inert.
+- Multiline **input fences**: ` ```% ` / ` ```%% ` / ` ```python % ` / ` ```python %% `.
+  Rule: a trailing `%` = run once, `%%` = shared session, no marker = inert.
   The language word stays first so the block syntax-highlights.
 - `python` cells via a tiny **driver** (length-prefixed `exec` into a persistent
   globals dict) — NOT a bare REPL (which breaks on indented multiline).
@@ -210,21 +213,21 @@ run in **the user's repo**, not the document's dir. Proposed model:
 | `foo.bar.` | peek/list the dir (built) |
 | `foo.bar arg1 arg2` | run with args, **through the shell** (built) |
 | `foo.bar!` | edit the leaf's source; **scaffold it if missing** |
-| `$ bsh foo.bar [args]` | run from any shell/session cell, in the shell's `$PWD` |
+| `% bsh foo.bar [args]` | run from any shell/session cell, in the shell's `$PWD` |
 
 ### 1. Inline args (`foo.bar arg…`) — BUILT (2026-06-17)
 
-Dispatch now also matches `^(dotted)%s+(.+)$`. Crucially, the leaf is **not**
+Dispatch now also matches `^(dotted)%s+(.+)%`. Crucially, the leaf is **not**
 exec'd as a bare argv — it's resolved to its path and run as a **shell command**
-via `$`'s one-shot machinery (`run_ns_exec` → `run_shell(buf,…, shellescape(path)
+via `%`'s one-shot machinery (`run_ns_exec` → `run_shell(buf,…, shellescape(path)
 .. " " .. rest)`). So a namespace cell is a true **continuation of the shell**:
 the rest of the line is shell syntax, so redirection (`> out.txt`), pipes
 (`| grep`), globs, and sub-shells (`$(…)`) all work, not just positional args.
-Runs in the document's dir, like `$`. Still gated on the first token resolving, so
+Runs in the document's dir, like `%`. Still gated on the first token resolving, so
 prose (`hello world`) and `<dir> <args>` (no `.enter`) fall through to prose.
 Verified: `llm.tools.reverse hello`→`olleh`, `… | tr a-z A-Z`, `reverse "$(echo
 abc)"`→`cba`, `weather Izmir > file`. (Conceptually this is the in-buffer twin of
-the future `$ bsh foo.bar …` dispatcher; bsh resolves the path itself so it needs
+the future `% bsh foo.bar …` dispatcher; bsh resolves the path itself so it needs
 no external binary yet.)
 
 ### 2. Define-in-place (`foo.bar!`) — BUILT (2026-06-17)
@@ -261,15 +264,15 @@ bsh db.prod "select 1"  # args forwarded
 ```
 
 Why this is the unifier:
-- **Solves the cwd problem** (`git.undo` in *your* repo): route through a `$$`
-  session that `cd`'d there — `$$ cd ~/myrepo` then `$$ bsh git.undo`.
+- **Solves the cwd problem** (`git.undo` in *your* repo): route through a `%%`
+  session that `cd`'d there — `%% cd ~/myrepo` then `%% bsh git.undo`.
 - **One tree, everywhere:** the same namespace works in a real terminal outside
-  nvim, and from `$`/`:` cells — directly answering "should commands be callable
+  nvim, and from `%`/`:` cells — directly answering "should commands be callable
   from the shell?". Yes: via `bsh`.
 - In-buffer namespace cells keep running in the doc's dir (fine when the doc
   lives in the repo); for repo-relative work, go through a session + `bsh`.
 
-Open: whether the in-buffer `foo.bar` cell should also honour the buffer's `$$`
+Open: whether the in-buffer `foo.bar` cell should also honour the buffer's `%%`
 session cwd (deeper integration) or stay doc-dir. Lean: keep simple, push
 repo-relative through `bsh` in a session.
 
@@ -290,7 +293,7 @@ Pick targets that show the namespace+listing model off, à la Xiki:
   data (`db/data/{hosts,systems}.ndb`, deliberately heterogeneous). Data dir =
   `$BSH_NDB` or `./data`. **The db→route→session payoff is BUILT:** a resolved entry
   with a `dom`/`ip` (and optional `user=`) offers a `connect: <addr>` line whose
-  `<CR>` exits 151 to emit a `<addr>$$` session cell — so `db` walks you from a
+  `<CR>` exits 151 to emit a `<addr>%%` session cell — so `db` walks you from a
   record straight into a live shell on the machine it describes. (`systems.ndb`
   carries mktip's real boxes by their tailscale MagicDNS names.) Tested
   (`tests/test_db.lua`, incl. the connect→emit-cell, auto-skips without `ndbquery`).
@@ -333,7 +336,7 @@ Decisions that shaped it (all settled with the user):
   first token — the author designs the menu and parses as they like; most power to
   the script, no engine magic.
 - **The leap to a live shell isn't engine magic:** a script that sees `… shell`
-  simply *emits a `$`/`user@host$` cell* as its output, which the next run picks
+  simply *emits a `%`/`user@host%` cell* as its output, which the next run picks
   up. Escalation is authored, not built in. (Engine-managed promotion stays a
   future option if scripting it proves clunky.)
 
@@ -347,7 +350,7 @@ cases in `tests/test_namespace.lua`.
 
 ## Targets are routes; transports are user-definable — BUILT (2026-06-18, slice 1)
 
-The target (the bit before `$`/`:`) generalised from "empty | `user@host`" into a
+The target (the bit before `%`/`:`) generalised from "empty | `user@host`" into a
 **route**: `scheme@addr` hops chained with `/`, read **left = outermost**
 (outside-in, big → small — host, then into the thing on it):
 
@@ -357,9 +360,9 @@ web@prod/docker@api      # ssh to prod, then into container api  (ssh ∘ docker
 web@prod                 # plain ssh (unchanged: `web` isn't a transport scheme)
 ```
 
-The same route feeds **both** verbs (`:` lists a dir at the route's end, `$` runs
+The same route feeds **both** verbs (`:` lists a dir at the route's end, `%` runs
 there) — the verbs stay distinct, the *locator* is shared. That's the real content
-of the earlier "`:` merged with `$`?" question: merge the route, not the verbs.
+of the earlier "`:` merged with `%`?" question: merge the route, not the verbs.
 
 **Transports are user-definable; the engine hardcodes only ssh.** This is the
 namespace philosophy (no registry, you own the definitions) applied to *getting
@@ -388,23 +391,23 @@ need no ssh/docker/jail present.
 
 ## Sessions over transports + the cwd prompt — BUILT (2026-06-18, slice 2)
 
-A `$$` session is no longer ssh-or-local: its argv goes through the **same**
+A `%%` session is no longer ssh-or-local: its argv goes through the **same**
 `build_argv` route as a one-shot, terminating in a persistent login shell
-(`exec ${SHELL:-/bin/sh} -l`) reached at the route's end. So `docker@id$$`,
-`web@prod/docker@api$$`, `jail@www$$` — anything the route grammar can express —
+(`exec ${SHELL:-/bin/sh} -l`) reached at the route's end. So `docker@id%%`,
+`web@prod/docker@api%%`, `jail@www%%` — anything the route grammar can express —
 is a persistent shell where `export`/`cd`/venv carry across cells, exactly like a
-local `$$`. One change in `bsh.session`'s `sh` spec; the streaming/sentinel
+local `%%`. One change in `bsh.session`'s `sh` spec; the streaming/sentinel
 machinery was already transport-agnostic. (Live-verified: a real `ssh→docker`
 session carried a var across two cells inside the container.)
 
 The wrapping is a double login shell for ssh (`sh -lc 'exec … -l'`) — harmless,
 `exec` replaces the process, and it keeps the engine uniform (no session-special
-hop logic). `python $$` is unchanged (no transport; its driver argv is local).
+hop logic). `python %%` is unchanged (no transport; its driver argv is local).
 
 **The cwd prompt (read the shell, never parse `cd`).** The `sh` session's sentinel
 now carries `$PWD` alongside the exit code (`__BSH_<tok>__:<rc>:<pwd>`), so we
 learn the cwd from the shell *itself* — robust to dynamic paths, subshells, and
-`cd -`, which static parsing of the trigger could never be. Each finished `$$`
+`cd -`, which static parsing of the trigger could never be. Each finished `%%`
 cell gets an **eol virt_text badge** on its prompt line reading like the prompt it
 mirrors: `web@prod:/var/log` remote, just the path locally. It's a separate
 extmark namespace (`bsh_prompt`), so it never tangles with the fence/inflight
@@ -416,7 +419,7 @@ Tests: `tests/test_session.lua` — env carries across cells; the badge tracks
 transport that runs a shell locally, so the route path is exercised end-to-end
 without a network).
 
-**The badge is a *last-ran-here* marker, not a live prompt (known, kept).** A `$$`
+**The badge is a *last-ran-here* marker, not a live prompt (known, kept).** A `%%`
 session has exactly ONE cwd at any instant (it's one shell), but the badge is
 written *per cell, at completion* — "where the shell was when THIS command ran."
 So if an earlier cell `cd /tmp`, the shell is now in `/tmp` and every later cell
@@ -437,7 +440,7 @@ We lean log, so calling it a *prompt* oversells it — read it as "where this la
 ran." Making it truly live would mean the session tracks ALL its cells' prompt
 rows (a set of extmarks per `(buf, lang, target)`) and re-broadcasts the new cwd
 to every one on each completion — more bookkeeping, and it forces the cells-above
-weirdness above. **Future:** this is really a question of *what `$$` shares*. Today
+weirdness above. **Future:** this is really a question of *what `%%` shares*. Today
 it shares everything incl. cwd (one shell). One could imagine a variant that
 shares env/vars but NOT cwd (each cell its own directory — badges trivially
 coherent because each is independent), or the present whole-shell variant with
@@ -461,18 +464,18 @@ special codes as success (no `[exit N]`).
 
 This finally **ties the route grammar to the menu model**: `examples/bsh-home/docker/`
 is the worked trio —
-- `docker.conn` — `docker ps` as a menu (150); `<CR>` a row → emits `docker@<id>$$ `
+- `docker.conn` — `docker ps` as a menu (150); `<CR>` a row → emits `docker@<id>%% `
   (151), a live container shell (the slice-2 session-over-transport).
 - `docker.list` — `docker ps -a` menu → an actions sub-menu (`shell`/`start`/`stop`/
   `restart`/`rm`); `shell` emits a cell, the rest print into an `out` fence.
 - `docker.create [name]` — `docker run -d … alpine sleep infinity`, then emits the
-  new box's `docker@<name>$$ ` cell. Create-then-shell in one `<CR>`.
+  new box's `docker@<name>%% ` cell. Create-then-shell in one `<CR>`.
 
 The drilled menu line arrives as one quoted arg (`"<id>  <image>  <name>"`), so the
 scripts take `${1%% *}` as the id. Tested docker-free via `demo.conn`
 (`tests/test_namespace.lua`: menu → drill → exit-151 replaces the trigger), and
 live end-to-end against a real (podman-backed) container: `docker.conn` → drill →
-`docker@<id>$$ cat /etc/alpine-release` → `3.24.1` *inside* the container.
+`docker@<id>%% cat /etc/alpine-release` → `3.24.1` *inside* the container.
 
 **Next:** VM **consoles** (PTY) stay with the parked interactivity work; the
 ssh-style `vm` template covers the exec case now. A `git.*`/`db.*` flagship and the
@@ -481,8 +484,8 @@ ssh-style `vm` template covers the exec case now. A `git.*`/`db.*` flagship and 
 ## Output to a side buffer (a gesture, not a marker) — BUILT (2026-06-17)
 
 **Built:** `<C-CR>` / `g<CR>` runs a cell with output into a side buffer instead of
-inline, across **every output cell type**: `$`, `$$` shell session, `python $`
-one-shot, `python $$` session, and namespace cells. The buffer is an unbounded
+inline, across **every output cell type**: `%`, `%%` shell session, `python %`
+one-shot, `python %%` session, and namespace cells. The buffer is an unbounded
 `nofile` scratch named `bsh://out/<doc>/<n>`; that name is written into an owned
 ` ```log ` reference fence and IS the durable link; `out_bufs` caches name→bufnr.
 `buffer_sink` writes output in (follow/autoscroll) and keeps the reference line's
@@ -490,7 +493,7 @@ status (`<link> · N lines · running…/exit C · <CR> open`). One helper
 `begin_buffer_run` (reuse/mint buffer + clear + stage `log` fence + sink) is the
 single fork in each run path; `run_job` takes the sink for streamed cells, and the
 session pump hands the sink to its queue item and calls it instead of `fill_fence`
-(a `$$` fence is pure output, so it's the same as `$` — it just fills on unit
+(a `%%` fence is pure output, so it's the same as `%` — it just fills on unit
 completion rather than streaming). Re-run reuses the linked buffer (only
 `ensure_out_buffer` mints a new one when there's no live link); a cell that owns a
 `log` fence is sticky on a plain `<CR>` too; `<CR>` on the reference line opens the
@@ -499,7 +502,7 @@ buffer (`open_out_buffer`). `log` is in `OWNED_TAGS` so re-runs replace the fenc
 **Deliberately NOT routed:** `:` listings — their output IS interactive (in-fence
 drill/open), so it must stay in the doc fence. **Not yet:** persist-on-`:w` to a
 real `bsh:file:` path; an explicit stop keymap (re-run already restarts;
-`M.stop_session` on wipe); live streaming for `$$` sessions (they fill on unit
+`M.stop_session` on wipe); live streaming for `%%` sessions (they fill on unit
 completion, pre-existing).
 
 Original rationale + spec below.
@@ -508,16 +511,18 @@ Some output shouldn't live inline under the cell: long build logs, `tail -f`, a
 dev server, anything you want to scroll/search separately. The cell should leave a
 compact **reference**, and the bytes should live in a **separate buffer**.
 
-**Design pivot (2026-06-17): there is NO `%` marker.** `%` had been a stand-in for
-"async / long-running / buffered output", but:
+**Design pivot (2026-06-17): output destination is NOT a marker.** A dedicated
+async/buffered-output marker had been sketched (back when `$` was still the run
+sigil, the spare glyph for it was `%` — since freed up and now the run marker
+itself), but:
 
 - **async is already universal** — every cell runs via `jobstart` and streams, so
-  `%`-as-async would mark something every cell already is.
+  an async marker would mark something every cell already is.
 - **where output goes (inline vs side buffer) is ORTHOGONAL** to run semantics — a
-  `$`, `$$`, `python`, namespace, or `:` cell could each want either. Orthogonal
+  `%`, `%%`, `python`, namespace, or `:` cell could each want either. Orthogonal
   properties belong in a **gesture**, not a marker (markers are for run *kind*).
 - **background/`&`** (fire-and-forget, drop output) mostly already works via
-  `$ cmd &` (the shell backgrounds it, child reparents to init); a dedicated `&`
+  `% cmd &` (the shell backgrounds it, child reparents to init); a dedicated `&`
   marker would only add explicit detach — marginal, not built.
 
 So: output destination is a **second keybinding**, available on **every** cell:
@@ -540,7 +545,7 @@ on disk and must not be persisted preemptively** — huge / infinite / sensitive
   with a one-line live status:
 
   ```
-  $ ./build.sh
+  % ./build.sh
   ```log
   bsh://out/build.sh · 4213 lines · exit 0 · <CR> open · :w persist
   ```
@@ -585,7 +590,7 @@ differently:
   `sudo` needs `-A`; ssh/git pick up the env var without flags. A `sudo` wrapper
   on `$BSH_HOME`/PATH that adds `-A` could paper over that.)
 - **Genuinely interactive tools (REPLs, `fzf`, `vim`, `top`, `git rebase -i`)** —
-  need a real TTY. Escape-hatch marker **`$!`** ("shell, interactive", bang =
+  need a real TTY. Escape-hatch marker **`%!`** ("shell, interactive", bang =
   special, consistent with `:Bsh!` / `foo.bar!`): run the command in a **PTY**
   via `termopen()`/`jobstart({pty=true})`, in a **floating terminal by default**
   (user dislikes the nvim terminal split; float is least intrusive), configurable
@@ -595,7 +600,7 @@ differently:
 
 ## External display (images / GUI) — parked, no action
 
-GUI apps already work (`$ firefox` launches Firefox). Inline **images** /
+GUI apps already work (`% firefox` launches Firefox). Inline **images** /
 image-generating commands: park until Neovim has native image handling; then show
 in a **floating window** via a terminal graphics protocol (image.nvim /
 snacks.image). User explicitly wants to wait on an upstream nvim feature here.
@@ -605,27 +610,27 @@ snacks.image). User explicitly wants to wait on an upstream nvim feature here.
 Let code fences get real LSP (Python/Ruby/… inside the doc) by feeding
 [otter.nvim](https://github.com/jmbuhr/otter.nvim) the fenced code as synthetic
 per-language documents. **Known limitation to design around:** otter gives
-*static* analysis of fence *source*; it can't see `$$` / `python $$` **runtime**
+*static* analysis of fence *source*; it can't see `%%` / `python %%` **runtime**
 state — a variable created by *executing* an earlier cell lives in the live
 session process, not the text, so the LSP would flag it "undefined". That gap is
 inherent to static analysis, not a bug. Neat alignment to exploit: feed *all* of
-a buffer's `python $$` cells as **one** otter document, so statically-defined
+a buffer's `python %%` cells as **one** otter document, so statically-defined
 symbols carry across cells the same way the session accumulates them — otter's
 per-language concatenation ≈ the session's accumulated namespace. Probably out of
 scope for bsh proper (a user can add otter themselves), but bsh could expose the
-cell ranges/order to make it work well. It's also worth remembering that `$$`
-does not only connect visible `$$` instances, but even absent ones. A user can
-mutate the state in a `$$` then delete it from the file, yet the mutation is
-still in the state and the lsp will still be unaware of it even if all `$$`
+cell ranges/order to make it work well. It's also worth remembering that `%%`
+does not only connect visible `%%` instances, but even absent ones. A user can
+mutate the state in a `%%` then delete it from the file, yet the mutation is
+still in the state and the lsp will still be unaware of it even if all `%%`
 cells were given to it for context.
 
 ## Other roadmap bits (parked)
 
-- **Prompt loop** for the shell-first feel: run → drop a fresh `$$ ` prompt below
+- **Prompt loop** for the shell-first feel: run → drop a fresh `%% ` prompt below
   in insert mode; plus Ctrl-C interrupt (we already track the job) and a
   pwd-aware prompt.
 - **Side-buffer output / long-runner** → specced above ("Output to a side
-  buffer"): a `<C-CR>` gesture (no `%` marker) → bounded ring buffer + reference
+  buffer"): a `<C-CR>` gesture (no async marker) → bounded ring buffer + reference
   fence + sticky-via-`log`-fence + persist-on-`:w`.
 - **Interactive tree**: replace the `tree -F` text dump with a lazy,
   inline-expandable tree (folders expand/collapse in place, children listed on

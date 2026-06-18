@@ -14,26 +14,30 @@ prose and commands interleaved, expand-in-place instead of scrollback — but
 built for Neovim and centred on being a *shell* first, a document second.
 
 ```
-$ uname -s                 ← press <CR> on this line
+% uname -s                 ← press <CR> on this line
 ```out                       ← bsh writes (and rewrites) this fence
 Linux
 ```
 ```
 
+The run marker is configurable — one variable, `require('bsh').config.marker`
+(default `%`, doubled `%%` for a session). Set it back to `$` for the classic
+look; the docs below use `%`.
+
 ## Cells
 
-Marker grammar: a trailing **`$`** runs once, **`$$`** runs in a persistent
+Marker grammar: a trailing **`%`** runs once, **`%%`** runs in a persistent
 session, no marker is inert (so plain code blocks stay dead).
 
 | Cell | What it does |
 |------|--------------|
-| `$ cmd` | one-shot shell command → `out` fence |
-| `$$ cmd` | persistent shell — `export`/`cd`/venv carry across cells |
-| `user@host$ cmd` | run over `ssh` (one-shot or `$$` session) |
-| `docker@id$ cmd` | run inside a container (any transport — see below) |
-| `docker@id$$ cmd` | a *persistent* shell inside it — `$$` composes over any route |
-| ` ```$$ … ``` ` | multiline block, `<CR>` anywhere inside runs it all |
-| ` ```python $ ` / ` ```python $$ ` | Python, one-shot or a stateful session |
+| `% cmd` | one-shot shell command → `out` fence |
+| `%% cmd` | persistent shell — `export`/`cd`/venv carry across cells |
+| `user@host% cmd` | run over `ssh` (one-shot or `%%` session) |
+| `docker@id% cmd` | run inside a container (any transport — see below) |
+| `docker@id%% cmd` | a *persistent* shell inside it — `%%` composes over any route |
+| ` ```%% … ``` ` | multiline block, `<CR>` anywhere inside runs it all |
+| ` ```python % ` / ` ```python %% ` | Python, one-shot or a stateful session |
 | `: path` | navigable directory listing (`<CR>` drills in / opens files) |
 | `: goto query` | fuzzy-jump to a directory, then list it |
 | `https://…` | open the URL in your browser |
@@ -75,7 +79,7 @@ export BSH_HOME="$HOME/pockt/bsh"
 `bin/bsh` is the CLI half: it resolves a dotted name the same way (`bsh git.undo`
 → `$BSH_HOME/git/undo`, shebang-dispatched) and execs it **in the current
 directory** — so a namespace command runs in *your* `$PWD`, not the document's.
-Put it on `PATH` and it works in a `$`/`$$` cell, a real terminal, or over ssh:
+Put it on `PATH` and it works in a `%`/`%%` cell, a real terminal, or over ssh:
 
 ```sh
 export PATH="$PATH:/path/to/bsh.nvim/bin"
@@ -84,8 +88,8 @@ export PATH="$PATH:/path/to/bsh.nvim/bin"
 That's the answer to repo-relative commands: route through a session that's there.
 
 ```
-$$ cd ~/myrepo
-$$ bsh git.undo        # runs git.undo IN ~/myrepo (bsh never cd's)
+%% cd ~/myrepo
+%% bsh git.undo        # runs git.undo IN ~/myrepo (bsh never cd's)
 ```
 
 (Inside the editor a bare `foo.bar` cell already resolves in-process; `bsh` is for
@@ -93,20 +97,20 @@ $$ bsh git.undo        # runs git.undo IN ~/myrepo (bsh never cd's)
 
 ### Targets are routes (ssh, containers, jails, VMs — composable)
 
-The bit before `$`/`:` is a **route**: `scheme@addr` hops chained with `/`, read
+The bit before `%`/`:` is a **route**: `scheme@addr` hops chained with `/`, read
 left = outermost (outside-in, big → small). The same route drives both verbs —
-`:` lists, `$` runs:
+`:` lists, `%` runs:
 
 ```
-docker@api $ ps aux            # exec inside a local container
+docker@api % ps aux            # exec inside a local container
 docker@api : /var/log          # …list a dir inside it
-docker@api $$ cd /srv          # a PERSISTENT shell inside it (env/cwd carry)
-web@prod/docker@api $ ps aux   # ssh to `prod`, then into container `api`
-web@prod $ uname -a            # plain ssh (unchanged)
+docker@api %% cd /srv          # a PERSISTENT shell inside it (env/cwd carry)
+web@prod/docker@api % ps aux   # ssh to `prod`, then into container `api`
+web@prod % uname -a            # plain ssh (unchanged)
 ```
 
-`$$` sessions ride the *same* route, so a persistent shell works over any
-transport, not just ssh. Each `$$` cell shows a small **cwd badge** at end of line
+`%%` sessions ride the *same* route, so a persistent shell works over any
+transport, not just ssh. Each `%%` cell shows a small **cwd badge** at end of line
 (`web@prod:/srv`) read from the shell's own `$PWD` — so it's right through `cd`,
 dynamic paths, and subshells, where parsing the command never could be. Note it's
 a *last-ran-here* marker, not a live prompt: it records where **that** cell ran,
@@ -156,15 +160,15 @@ esac
 output: print one line and **exit `151`** (`cell_exit`), and bsh replaces the
 trigger (and its fence) with that line, cursor parked at its end. Combined with
 menus this gives "pick X → get a cell for X": a `docker.conn` lists running
-containers (a menu), and `<CR>` on one emits a `` docker@<id>$$ `` **session cell**
+containers (a menu), and `<CR>` on one emits a `` docker@<id>%% `` **session cell**
 — a live shell inside that container, ready to type into. The bundled
 `examples/bsh-home/docker/` shows the trio:
 
 | Command | Does |
 |---------|------|
-| `docker.conn` | menu of running containers → `<CR>` opens a `docker@<id>$$` shell |
+| `docker.conn` | menu of running containers → `<CR>` opens a `docker@<id>%%` shell |
 | `docker.list` | menu of *all* containers → actions: `shell` / `start` / `stop` / `restart` / `rm` |
-| `docker.create [name]` | spin up an alpine box (kept alive) → emits its `docker@<name>$$` shell |
+| `docker.create [name]` | spin up an alpine box (kept alive) → emits its `docker@<name>%%` shell |
 
 **`db.*` — a faceted [ndb](https://9p.io/sys/doc/9.html) (Plan 9 database) browser.**
 ndb is *schema-less* — an entry is just a bag of `attr=value` pairs, no two entries
@@ -179,13 +183,13 @@ db hosts role=fileserver service=nfs   → AND-narrowed (the breadcrumb is a fil
 
 Every menu line is a valid `attr=value` term; `<CR>` appends it (AND) and re-runs,
 backspace the breadcrumb to widen. And a resolved entry with a `dom`/`ip` offers a
-`connect: <addr>` line — `<CR>` on it **emits a `<addr>$$` session cell** (a live
+`connect: <addr>` line — `<CR>` on it **emits a `<addr>%%` session cell** (a live
 shell on that host), so the database connects you to what it describes:
 
 ```
 db systems sys=simurgh-base
   → … dom=simurgh-base  user=mktips  …  connect: mktips@simurgh-base
-                                          └ <CR> ⇒ mktips@simurgh-base$$  (a shell there)
+                                          └ <CR> ⇒ mktips@simurgh-base%%  (a shell there)
 ```
 
 Matching uses the real ndb engine (`ndbquery`), so install
