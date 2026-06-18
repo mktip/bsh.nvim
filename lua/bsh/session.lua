@@ -104,6 +104,11 @@ local function set_prompt_badge(buf, row, target, cwd)
   pcall(vim.api.nvim_buf_set_extmark, buf, promptns, row, 0, {
     virt_text = { { "  " .. label, "Comment" } },
     virt_text_pos = "eol",
+    -- A zero-width mark at col 0 would otherwise shift onto a neighbouring line
+    -- when its prompt line is deleted, orphaning the badge. `invalidate` hides it
+    -- once its range is gone; `undo_restore = false` deletes it outright.
+    invalidate = true,
+    undo_restore = false,
   })
 end
 
