@@ -332,6 +332,10 @@ function M.attach(buf)
     { buffer = buf, desc = "bsh: run cell (output to side buffer)" })
   vim.keymap.set("n", "g<CR>", function() run_here(true) end,
     { buffer = buf, desc = "bsh: run cell (output to side buffer)" })
+
+  -- optional: real LSP inside ```python fences via otter.nvim. No-op when otter
+  -- isn't installed or config.otter is off (see lua/bsh/otter.lua).
+  require("bsh.otter").activate(buf)
 end
 
 M.config = function()

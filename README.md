@@ -46,6 +46,26 @@ session, no marker is inert (so plain code blocks stay dead).
 
 Output streams live. Each result fence folds to a one-line summary.
 
+### LSP inside `python` fences (optional, via otter.nvim)
+
+Install [otter.nvim](https://github.com/jmbuhr/otter.nvim) and bsh wires it up
+automatically: completion, hover, go-to-definition and diagnostics work *inside*
+` ```python ` fences, served by your normal Python LSP (pyright/ruff/…). otter
+mirrors each fence into a hidden buffer and attaches the language server there;
+completion arrives through the standard `nvim_lsp` completion source.
+
+It's a soft dependency — `config.otter` defaults to `"auto"` (on iff otter.nvim
+is installed, a no-op otherwise; set `true` to force-on/warn, `false` to disable):
+
+```lua
+{ "mktip/bsh.nvim", dependencies = { "jmbuhr/otter.nvim" }, config = true }
+```
+
+For the dedicated `bsh` filetype, bsh points treesitter at the `markdown` parser
+(so otter's injections query finds the fences, and the fenced code gets
+highlighted); `*.bsh.md` buffers are already markdown and need nothing. Requires
+the `markdown` (and your fence languages, e.g. `python`) treesitter parsers.
+
 ### Run keys: inline vs a side buffer
 
 - **`<CR>`** runs the cell and shows output **inline**, in an owned fence below it.

@@ -43,6 +43,20 @@ M.agent_template = "web"
 -- interpreter used for `python` cells (one-shot `python $` and session `python $$`).
 M.python = "python3"
 
+-- Optional otter.nvim integration: real LSP (completion, hover, go-to-def,
+-- diagnostics) INSIDE ```python fences -- otter mirrors each fence into a hidden
+-- buffer and attaches a language server to it (use your normal pyright/ruff).
+--   "auto"  -> enable iff otter.nvim is installed (a no-op otherwise) -- default
+--   true    -> force on; warn once if otter.nvim is missing
+--   false   -> off
+-- bsh has no hard dependency on otter; everything is pcall-guarded. See
+-- lua/bsh/otter.lua and the README ("LSP inside code blocks").
+M.otter = "auto"
+
+-- Languages otter activates inside fences. `python` is the one bsh runs; add
+-- more (e.g. "lua") if you keep other fenced code you want LSP for.
+M.otter_languages = { "python" }
+
 -- language a `foo.bar!` define-in-place scaffolds a NEW leaf in: "sh" (a plain
 -- shell command, lowest friction) or "python" (the dual-purpose command/`llm`
 -- tool skeleton). Cosmetic extension only; dispatch stays shebang-driven.
