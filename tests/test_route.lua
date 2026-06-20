@@ -57,7 +57,7 @@ end
 
 T["a container over ssh nests (host first, then container)"] = function()
   H.bootstrap(child)
-  local a = argv("web@prod/docker@api", "ls") -- outside-in: ssh host, then into container
+  local a = argv("web@prod/docker@api", "ls")           -- outside-in: ssh host, then into container
   eq({ a[1], a[2], a[3] }, { "ssh", "-T", "web@prod" }) -- leftmost hop is the outer ssh one
   -- the command it runs on prod is the docker exec into api (each word is quoted
   -- by shelljoin, so assert the words are present rather than a literal substring)

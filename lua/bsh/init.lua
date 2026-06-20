@@ -36,7 +36,8 @@ local config = require("bsh.config")
 
 local job = require("bsh.job")
 local build_argv, run_job, shell_transform, doc_cwd = job.build_argv, job.run_job, job.shell_transform, job.doc_cwd
-local existing_log_link, begin_buffer_run, open_out_buffer = job.existing_log_link, job.begin_buffer_run, job.open_out_buffer
+local existing_log_link, begin_buffer_run, open_out_buffer = job.existing_log_link, job.begin_buffer_run,
+    job.open_out_buffer
 local run_shell, run_oneshot = job.run_shell, job.run_oneshot
 
 local session = require("bsh.session")
@@ -47,11 +48,11 @@ local run_agent = require("bsh.agent").run_agent
 
 local listing = require("bsh.listing")
 local run_list, open_entry, fence_open, tree_path, open_url =
-  listing.run_list, listing.open_entry, listing.fence_open, listing.tree_path, listing.open_url
+    listing.run_list, listing.open_entry, listing.fence_open, listing.tree_path, listing.open_url
 
 local namespace = require("bsh.namespace")
 local ns_home, run_namespace, edit_namespace =
-  namespace.ns_home, namespace.run_namespace, namespace.edit_namespace
+    namespace.ns_home, namespace.run_namespace, namespace.edit_namespace
 
 -- Parse a fence info-string into (lang, target, session) or nil if it's not a
 -- runnable cell. The run marker is a SUFFIX (`$` once / `$$` session) so the
@@ -74,19 +75,27 @@ local function input_fence_at(buf, row)
   for r = row, 0, -1 do
     local l = gl(r)
     if l:match("^%s*```%s*$") then return nil end
-    if l:match("^%s*```%S") then openr = r; break end
+    if l:match("^%s*```%S") then
+      openr = r; break
+    end
   end
   if not openr then return nil end
   local lang, target, session = parse_runmarker(vim.trim(gl(openr):match("^%s*```(.*)$") or ""), config.marker)
   if not lang then return nil end -- e.g. ```out / ```python (no marker) -> inert
   local closer
   for r = openr + 1, total - 1 do
-    if gl(r):match("^%s*```%s*$") then closer = r; break end
+    if gl(r):match("^%s*```%s*$") then
+      closer = r; break
+    end
   end
   if not closer or row > closer then return nil end
   return {
-    open = openr, close = closer, indent = gl(openr):match("^(%s*)"),
-    lang = lang, target = target, session = session,
+    open = openr,
+    close = closer,
+    indent = gl(openr):match("^(%s*)"),
+    lang = lang,
+    target = target,
+    session = session,
     body = table.concat(vim.api.nvim_buf_get_lines(buf, openr + 1, closer, false), "\n"),
   }
 end
@@ -101,7 +110,7 @@ local function menu_fence_at(buf, row)
   for r = row - 1, 0, -1 do
     local s = gl(r)
     if s:match("^%s*```menu%s*$") then return r end
-    if s:match("^%s*```%S") then return nil end  -- some other opening fence
+    if s:match("^%s*```%S") then return nil end   -- some other opening fence
     if s:match("^%s*```%s*$") then return nil end -- a closer above -> outside any fence
   end
   return nil
@@ -117,7 +126,9 @@ local function execute_cell(to_buf)
 
   -- <CR> on a `log` reference line opens that cell's output buffer in a split.
   local outlink = line:match("(bsh://out/%S+)")
-  if outlink then open_out_buffer(outlink); return true end
+  if outlink then
+    open_out_buffer(outlink); return true
+  end
 
   -- Cursor inside a `$`/`$$` (or `python $`/`$$`) input fence: run the WHOLE
   -- block (multiline). The owned `out` fence is staged just after the block's
@@ -297,6 +308,78 @@ local function execute_cell(to_buf)
   return false
 end
 
+-- If the cursor sits on a persistent-session cell, return its { lang, target }.
+-- Two cell shapes carry a session: a multiline input fence with the `$$` suffix
+-- (```python $$```, ```$$```) and the inline doubled marker (`%% cmd`,
+-- `user@host%% cmd`). Anything else (one-shots, prose, output fences) -> nil.
+local function classify_session(buf, row)
+  local fc = input_fence_at(buf, row)
+  if fc and fc.session then return { lang = fc.lang, target = fc.target } end
+  local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
+  local m = vim.pesc(config.marker)
+  local stgt, sdbl, scmd = line:match("^%s*(%S-)(" .. m .. m .. "?)%s+(.+)$")
+  if scmd and sdbl == config.marker .. config.marker then
+    return { lang = "sh", target = stgt }
+  end
+  return nil
+end
+
+local function session_label(c)
+  return (c.target ~= "" and (c.target .. " ") or "") .. c.lang
+end
+
+-- <C-c> / :BshCancel — cancel the running cell under the cursor. A one-shot
+-- (`$`/`%`) is stopped outright; a session cell's running command is INTERRUPTED
+-- (SIGINT) so the session itself survives. Falls back to the sole busy session in
+-- the buffer when the cursor isn't on a recognisable cell.
+local function cancel_here()
+  local buf = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  if job.cancel_at(buf, row) then return end
+  local c = classify_session(buf, row)
+  if c and session.interrupt_session(buf, c.lang, c.target) then
+    vim.notify("bsh: interrupted " .. session_label(c) .. " session (SIGINT)")
+    return
+  end
+  local busy = {}
+  for _, s in ipairs(session.list_sessions(buf)) do if s.busy then busy[#busy + 1] = s end end
+  if #busy == 1 then
+    session.interrupt_session(buf, busy[1].lang, busy[1].target)
+    vim.notify("bsh: interrupted " .. session_label(busy[1]) .. " session (SIGINT)")
+    return
+  end
+  vim.notify("bsh: no running cell under the cursor", vim.log.levels.WARN)
+end
+
+-- <localleader>R / :BshReset[!] — reset (restart) the session for the cell under
+-- the cursor, so the next run gets a fresh interpreter. `!` resets every session
+-- in the buffer. With one session and an ambiguous cursor we reset it anyway;
+-- with several we refuse and point at `!` rather than guess.
+local function reset_here(all)
+  local buf = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  if all then
+    local n = session.reset_all(buf)
+    vim.notify("bsh: reset " .. n .. " session" .. (n == 1 and "" or "s"))
+    return
+  end
+  local c = classify_session(buf, row)
+  if c and session.reset_session(buf, c.lang, c.target) then
+    vim.notify("bsh: reset " .. session_label(c) .. " session")
+    return
+  end
+  local list = session.list_sessions(buf)
+  if #list == 0 then
+    vim.notify("bsh: no session here", vim.log.levels.WARN)
+  elseif #list == 1 then
+    session.reset_session(buf, list[1].lang, list[1].target)
+    vim.notify("bsh: reset " .. session_label(list[1]) .. " session")
+  else
+    vim.notify("bsh: multiple sessions — put the cursor on a session cell, or :BshReset! to reset all",
+      vim.log.levels.WARN)
+  end
+end
+
 -- Turn ANY buffer into a lab: the cell-running <CR>, comment style and folding,
 -- WITHOUT changing its filetype (so an existing markdown file keeps its markdown
 -- syntax highlighting). Idempotent -- safe to call more than once on a buffer.
@@ -332,6 +415,19 @@ function M.attach(buf)
     { buffer = buf, desc = "bsh: run cell (output to side buffer)" })
   vim.keymap.set("n", "g<CR>", function() run_here(true) end,
     { buffer = buf, desc = "bsh: run cell (output to side buffer)" })
+
+  -- <C-c> cancels the running cell under the cursor (one-shot: stop; session:
+  -- SIGINT the running command, keep the session). <C-k> ("kill") resets the
+  -- session for the cell under the cursor (<C-k> has no default normal-mode
+  -- meaning, unlike most ctrl keys). Both are also :BshCancel / :BshReset.
+  vim.keymap.set("n", "<C-c>", cancel_here,
+    { buffer = buf, desc = "bsh: cancel the running cell under the cursor" })
+  vim.keymap.set("n", "<C-k>", function() reset_here(false) end,
+    { buffer = buf, desc = "bsh: reset the session for the cell under the cursor" })
+  vim.api.nvim_buf_create_user_command(buf, "BshCancel", function() cancel_here() end,
+    { desc = "cancel the running cell under the cursor" })
+  vim.api.nvim_buf_create_user_command(buf, "BshReset", function(o) reset_here(o.bang) end,
+    { bang = true, desc = "reset the session for the cell under the cursor (! = all in buffer)" })
 
   -- optional: real LSP inside ```python fences via otter.nvim. No-op when otter
   -- isn't installed or config.otter is off (see lua/bsh/otter.lua).

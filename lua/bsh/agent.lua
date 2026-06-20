@@ -30,7 +30,7 @@ local function cell_above(buf, from)
   local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
   local function looks_trigger(s)
     return s:match("^%S-" .. vim.pesc(config.marker) .. "%s") or s:match("^%S-:%s")
-      or s:match("^https?://") or s:match("^>+%s")
+        or s:match("^https?://") or s:match("^>+%s")
   end
   local r = from
   while r >= 0 and gl(r):match("^%s*$") do r = r - 1 end
@@ -40,13 +40,17 @@ local function cell_above(buf, from)
   if f:match("^%s*```%s*$") then -- closing fence of an out/dir/tree block
     local openr
     for rr = r - 1, 0, -1 do
-      if gl(rr):match("^%s*```%S") then openr = rr; break end
+      if gl(rr):match("^%s*```%S") then
+        openr = rr; break
+      end
       if gl(rr):match("^%s*```%s*$") then break end
     end
     if not openr then return nil end
     local parts, top = {}, openr
     local trig = gl(openr - 1):gsub("^%s+", "")
-    if looks_trigger(trig) then parts[#parts + 1] = trig; top = openr - 1 end
+    if looks_trigger(trig) then
+      parts[#parts + 1] = trig; top = openr - 1
+    end
     vim.list_extend(parts, vim.api.nvim_buf_get_lines(buf, openr + 1, r, false))
     return table.concat(parts, "\n"), top
   end

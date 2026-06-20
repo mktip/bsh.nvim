@@ -13,6 +13,24 @@ local ns = M.ns
 M.inflight = {}
 local inflight = M.inflight
 
+-- Marks the user explicitly CANCELLED (via <C-c>/:BshCancel). The job's on_exit
+-- consults this so a cancelled run renders `[cancelled]` (keeping whatever it had
+-- already streamed) instead of a bare `[exit 143]`. Keyed buffer -> set of marks;
+-- `take_` is one-shot so each cancellation is consumed exactly once.
+M.cancelled = {}
+function M.set_cancelled(buf, mark)
+  M.cancelled[buf] = M.cancelled[buf] or {}
+  M.cancelled[buf][mark] = true
+end
+
+function M.take_cancelled(buf, mark)
+  local c = M.cancelled[buf]
+  if c and c[mark] then
+    c[mark] = nil; return true
+  end
+  return false
+end
+
 -- Locate (or plan the insertion of) the result fence that belongs to the
 -- trigger on 0-indexed row `trow`. The owned fence must begin on the very next
 -- line as `<indent>```<tag>` (tag is "out" for shell, "dir" for listings).
@@ -165,11 +183,11 @@ local FENCE = "^%s*```%s*$"
 
 function M.foldexpr(lnum)
   local line = vim.fn.getline(lnum)
-  if line:match(OPEN) or line:match(M.CELL_OPEN) then return ">1" end -- opener starts a fold
+  if line:match(OPEN) or line:match(M.CELL_OPEN) then return ">1" end   -- opener starts a fold
   if line:match(FENCE) or line:match(M.CELL_CLOSE) then return "<1" end -- closer ends it
   for l = lnum - 1, 1, -1 do
     local s = vim.fn.getline(l)
-    if s:match(OPEN) or s:match(M.CELL_OPEN) then return "1" end -- inside a body
+    if s:match(OPEN) or s:match(M.CELL_OPEN) then return "1" end   -- inside a body
     if s:match(FENCE) or s:match(M.CELL_CLOSE) then return "0" end -- a closer above
   end
   return "0"

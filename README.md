@@ -81,6 +81,26 @@ the `markdown` (and your fence languages, e.g. `python`) treesitter parsers.
 > that passthrough / "report all keys" in its config, or just use the always-works
 > **`g<CR>`** fallback (or remap it: `vim.keymap.set("n", "<your-key>", …)`).
 
+### Cancel & reset
+
+- **`<C-c>`** (or **`:BshCancel`**) cancels the running cell under the cursor. A
+  one-shot (`%`/`%%`-once) cell is **stopped** and its fence noted `[cancelled]`,
+  keeping whatever it had already streamed. A persistent-session cell's running
+  command is **interrupted** (SIGINT) so the session itself — its env, cwd, Python
+  globals — survives: a runaway loop in a `%%` or `` ```python %% `` cell is killed
+  without losing state. (With a single job in flight, `<C-c>` cancels it wherever
+  the cursor is; with several, only the one whose cell the cursor is in.)
+- **`<C-k>`** ("kill") (or **`:BshReset`**) **resets** the session for the cell
+  under the cursor — kills its process so the next run starts a **fresh
+  interpreter**: clean env, cleared Python globals, cwd back to the doc dir. Any
+  in-flight/queued cells finalise to `[session reset]`. **`:BshReset!`** resets
+  every session in the buffer.
+
+> SIGINT reaches the foreground *child* of a session shell (it has no job
+> control), so a runaway **external command** stops cleanly. A pure shell-builtin
+> loop with no child process (e.g. `while true; do :; done`) can't be interrupted
+> that way — reset the session instead.
+
 ### `$BSH_HOME` — a command namespace
 
 Point `$BSH_HOME` at a directory and its tree *is* a dotted command namespace,

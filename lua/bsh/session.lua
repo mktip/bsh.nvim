@@ -124,8 +124,15 @@ end
 local function sess_start(buf, lang, target)
   local spec = SPECS[lang]
   local key = skey(lang, target)
-  local s = { lang = lang, target = target, spec = spec, acc = "", busy = false, queue = {},
-              token = string.format("%08x", math.random(0, 0xffffffff)) }
+  local s = {
+    lang = lang,
+    target = target,
+    spec = spec,
+    acc = "",
+    busy = false,
+    queue = {},
+    token = string.format("%08x", math.random(0, 0xffffffff))
+  }
   local jb = vim.fn.jobstart(spec.argv(s.token, target), {
     cwd = doc_cwd(buf),
     on_stdout = function(_, data)
@@ -198,6 +205,94 @@ function M.run_session(buf, lang, target, trow, indent, cmd, to_buf, prow)
   end
   table.insert(sessions[buf][key].queue, item)
   sess_pump(buf, key)
+end
+
+-- Send SIGINT to the right process for a session's CURRENTLY RUNNING unit, the
+-- Ctrl-C equivalent that interrupts the command while keeping the session (env,
+-- cwd, Python globals) alive:
+--   python : signal the interpreter itself. Our driver execs each cell inside a
+--            `try/except BaseException`, so KeyboardInterrupt is caught, printed,
+--            and the read loop continues with the globals dict intact -- an
+--            infinite-loop cell is interruptible without losing state.
+--   sh     : signal the shell's foreground CHILD(ren) (`pgrep -P`), not the shell:
+--            a non-interactive shell has no job control, so SIGINT must hit the
+--            child directly. The shell then runs its sentinel printf (rc 130) and
+--            keeps reading stdin. (A pure shell-builtin loop with no child can't be
+--            interrupted this way -- reset the session instead.)
+local function interrupt_proc(s)
+  local ok, pid = pcall(vim.fn.jobpid, s.job)
+  if not ok or not pid or pid <= 0 then return end
+  local function sigint(p) vim.fn.system({ "kill", "-INT", tostring(p) }) end
+  if s.lang ~= "sh" then
+    sigint(pid); return
+  end
+  local kids = vim.fn.systemlist({ "pgrep", "-P", tostring(pid) })
+  if vim.v.shell_error == 0 and #kids > 0 then
+    for _, k in ipairs(kids) do
+      local n = tonumber(k); if n then sigint(n) end
+    end
+  else
+    sigint(pid)
+  end
+end
+
+-- Interrupt (SIGINT) the running command in this buffer's `lang`@`target` session.
+-- No-op unless the session exists AND is busy (a SIGINT to an idle interpreter
+-- waiting on stdin would escape its read loop and kill it). Returns true if a
+-- signal was sent. The session keeps running; its sentinel arrives normally, so
+-- the cell fills with whatever it produced plus the interrupt's exit note.
+function M.interrupt_session(buf, lang, target)
+  local s = sessions[buf] and sessions[buf][skey(lang, target)]
+  if not (s and s.busy) then return false end
+  pcall(interrupt_proc, s)
+  return true
+end
+
+-- RESET a session: kill its process and forget it, so the next `$$`/`%%` (or
+-- ```python %%```) run starts a fresh interpreter -- clean env, cleared Python
+-- globals, cwd back to the doc dir. Any in-flight/queued cells get their staged
+-- fences finalised to `[session reset]` rather than left dangling on "...running...".
+-- Works whether or not the session is busy. Returns true if a session existed.
+function M.reset_session(buf, lang, target)
+  local key = skey(lang, target)
+  local s = sessions[buf] and sessions[buf][key]
+  if not s then return false end
+  local pending = {}
+  if s.current then pending[#pending + 1] = s.current end
+  for _, it in ipairs(s.queue) do pending[#pending + 1] = it end
+  for _, it in ipairs(pending) do
+    if it.sink then
+      it.sink({ "[session reset]" }, true, 130)
+      pcall(vim.api.nvim_buf_del_extmark, buf, ns, it.mark)
+      if inflight[buf] then inflight[buf][it.mark] = nil end
+    elseif it.mark then
+      fill_fence(buf, it.mark, it.indent, { "[session reset]" })
+    end
+  end
+  if s.job then pcall(vim.fn.jobstop, s.job) end -- on_exit also nils the slot
+  if sessions[buf] then sessions[buf][key] = nil end
+  return true
+end
+
+-- The buffer's live sessions, as { lang, target, busy } records -- used by the
+-- dispatcher to disambiguate / fall back when the cursor isn't on a session cell.
+function M.list_sessions(buf)
+  local out = {}
+  if sessions[buf] then
+    for _, s in pairs(sessions[buf]) do
+      out[#out + 1] = { lang = s.lang, target = s.target, busy = s.busy }
+    end
+  end
+  return out
+end
+
+-- Reset every session in the buffer (the :BshReset! escape hatch). Returns count.
+function M.reset_all(buf)
+  if not sessions[buf] then return 0 end
+  local keys = {}
+  for _, s in pairs(sessions[buf]) do keys[#keys + 1] = { s.lang, s.target } end
+  for _, kt in ipairs(keys) do M.reset_session(buf, kt[1], kt[2]) end
+  return #keys
 end
 
 -- Stop all of a buffer's session processes (called when the buffer goes away).

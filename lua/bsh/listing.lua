@@ -74,7 +74,9 @@ function run_goto(buf, trow, indent, target, query, flags)
         local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
         if not pos[1] then return end
         local path
-        for _, l in ipairs(out) do if l ~= "" then path = l; break end end
+        for _, l in ipairs(out) do if l ~= "" then
+            path = l; break
+          end end
         if not path then -- no match: leave a note where the listing would be
           vim.api.nvim_buf_set_lines(buf, pos[1], pos[1] + 1, false,
             { indent .. "(goto: no match for '" .. query .. "')" })
@@ -91,7 +93,9 @@ function run_goto(buf, trow, indent, target, query, flags)
       end)
     end,
   })
-  if jb > 0 then inflight[buf][mark] = jb; pcall(vim.fn.chanclose, jb, "stdin") end
+  if jb > 0 then
+    inflight[buf][mark] = jb; pcall(vim.fn.chanclose, jb, "stdin")
+  end
 end
 
 -- Open a file entry: local via :edit; remote via netrw scp:// (best effort,
@@ -120,7 +124,7 @@ function M.fence_open(buf, row)
     local tag = s:match("^%s*```(%S+)%s*$")
     if tag then
       if tag == "dir" or tag == "tree" then return r, tag end
-      return nil -- some other fence (e.g. out) -> not navigable
+      return nil                                  -- some other fence (e.g. out) -> not navigable
     end
     if s:match("^%s*```%s*$") then return nil end -- closer above -> outside
   end
@@ -137,7 +141,9 @@ function M.tree_path(buf, lo, row, base)
   local parts, need = { [depth] = name }, depth - 1
   for r = row - 1, lo, -1 do
     local d, n = tree_entry(nm(r))
-    if d == need then parts[need] = n; need = need - 1; if need == 0 then break end end
+    if d == need then
+      parts[need] = n; need = need - 1; if need == 0 then break end
+    end
   end
   -- strip tree -F type markers (/ * = @ |) to recover bare names
   local rel = {}

@@ -71,8 +71,8 @@ function M.run_namespace(buf, trow, indent, dotted, args, to_buf)
   args = args or ""
   local home = M.ns_home()
   if home == "" then return false end
-  local force_list = dotted:sub(-1) == "."          -- trailing dot = list, not .enter
-  local clean = (dotted:gsub("%.+$", ""))           -- strip trailing dot(s)
+  local force_list = dotted:sub(-1) == "." -- trailing dot = list, not .enter
+  local clean = (dotted:gsub("%.+$", ""))  -- strip trailing dot(s)
   if clean == "" then return false end
   local base = home .. "/" .. (clean:gsub("%.", "/"))
 

@@ -148,6 +148,17 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
     on_exit = function(_, code)
       vim.schedule(function()
         local final = transform(split_out(), err_data, code)
+        -- user cancelled this run (<C-c>): keep whatever it had streamed, append a
+        -- `[cancelled]` note, and skip the cell-emit/retag paths (a killed command
+        -- hasn't legitimately "declared" anything by its signal-derived exit code).
+        if fence.take_cancelled(buf, mark) then
+          final[#final + 1] = "[cancelled]"
+          paint(final, true, code)
+          if finalize and not sink and vim.api.nvim_buf_is_valid(buf) then finalize(code) end
+          pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
+          if inflight[buf] then inflight[buf][mark] = nil end
+          return
+        end
         -- inline only: a command can EMIT A CELL -- swap its trigger + fence for a
         -- single line of cell text (e.g. a `docker@<id>$$ ` session cell). Takes
         -- precedence over painting; the fence/extmark are removed in the process.
@@ -157,7 +168,7 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
           if pos and pos[1] and pos[1] >= 2 then
             local body, total = pos[1], vim.api.nvim_buf_line_count(buf)
             local trigr = body - 2 -- trigger is the line above the opening fence
-            local endr = body       -- scan from the body for the closing ``` (exclusive end)
+            local endr = body      -- scan from the body for the closing ``` (exclusive end)
             for r = body, total - 1 do
               if (vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or ""):match("^%s*```%s*$") then
                 endr = r + 1; break
@@ -245,7 +256,7 @@ local function buffer_sink(buf, mark, indent, sidebuf, link)
       end
     end
     local status = link .. "  ·  " .. #lines .. (#lines == 1 and " line" or " lines")
-      .. "  ·  " .. (final and ("exit " .. (code or 0)) or "running…") .. "  ·  <CR> open"
+        .. "  ·  " .. (final and ("exit " .. (code or 0)) or "running…") .. "  ·  <CR> open"
     if vim.api.nvim_buf_is_valid(buf) then
       local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
       if pos[1] then
@@ -354,6 +365,49 @@ local function run_oneshot(buf, trow, indent, argv, to_buf)
   end
   local mark = stage_fence(buf, trow, indent, "out", "...running...")
   run_job(buf, indent, mark, argv, doc_cwd(buf), shell_transform)
+end
+
+-- Cancel the one-shot (`$`/`%`) job under the cursor. Each candidate is an
+-- in-flight body extmark; the cell it belongs to spans from its trigger (two
+-- lines above the body) down to its closing ```. With several jobs inflight, only the
+-- one whose region contains `row`. Sets the cancelled flag (so on_exit renders
+-- `[cancelled]`) and stops the job; its on_exit does the painting/cleanup.
+-- Returns true if a job was cancelled. Session jobs aren't tracked here (they live
+-- in bsh.session); the dispatcher tries those separately.
+function M.cancel_at(buf, row)
+  local jobs = inflight[buf]
+
+  if not jobs then return false end
+
+  local total = vim.api.nvim_buf_line_count(buf)
+  local cands = {}
+  for mark, jb in pairs(jobs) do
+    local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
+    if pos[1] then
+      local body, close = pos[1], pos[1]
+      for r = body, total - 1 do
+        if (vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or ""):match("^%s*```%s*$") then
+          close = r; break
+        end
+      end
+      cands[#cands + 1] = { mark = mark, job = jb, top = math.max(0, body - 2), close = close }
+    end
+  end
+  if #cands == 0 then return false end
+  local target
+
+  -- find the actual target falls within the row range we issued our cancel call in
+  for _, c in ipairs(cands) do
+    if row >= c.top and row <= c.close then
+      target = c; break
+    end
+  end
+
+  if not target then return false end
+
+  fence.set_cancelled(buf, target.mark)
+  pcall(vim.fn.jobstop, target.job)
+  return true
 end
 
 M.build_argv = build_argv
