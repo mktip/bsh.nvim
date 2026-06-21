@@ -51,8 +51,15 @@ Output streams live. Each result fence folds to a one-line summary.
 Install [otter.nvim](https://github.com/jmbuhr/otter.nvim) and bsh wires it up
 automatically: completion, hover, go-to-definition and diagnostics work *inside*
 ` ```python ` fences, served by your normal Python LSP (pyright/ruff/…). otter
-mirrors each fence into a hidden buffer and attaches the language server there;
-completion arrives through the standard `nvim_lsp` completion source.
+mirrors each fence into a hidden buffer and attaches the language server there as
+an LSP client, so the usual `vim.lsp.buf.*` mappings work on the fenced code;
+completion arrives through your normal LSP completion source.
+
+> **Formatting** is the exception: otter-ls (otter's proxy client) doesn't expose a
+> formatting capability to the host buffer, so `vim.lsp.buf.format()` reports *"no
+> matching language servers"*. Format fenced code with
+> [conform.nvim](https://github.com/stevearc/conform.nvim)'s **`injected`**
+> formatter instead — see ["Formatting fenced code"](#formatting-fenced-code) below.
 
 It's a soft dependency — `config.otter` defaults to `"auto"` (on iff otter.nvim
 is installed, a no-op otherwise; set `true` to force-on/warn, `false` to disable):
@@ -61,10 +68,40 @@ is installed, a no-op otherwise; set `true` to force-on/warn, `false` to disable
 { "mktip/bsh.nvim", dependencies = { "jmbuhr/otter.nvim" }, config = true }
 ```
 
-For the dedicated `bsh` filetype, bsh points treesitter at the `markdown` parser
-(so otter's injections query finds the fences, and the fenced code gets
-highlighted); `*.bsh.md` buffers are already markdown and need nothing. Requires
+Both otter and conform (below) find the fences through the buffer's treesitter
+**injections**, which key off its **filetype** — so bsh points treesitter at the
+`markdown` parser. `*.bsh.md` buffers are already markdown; the dedicated `bsh`
+filetype is mapped to markdown unconditionally (so the fenced code is highlighted
+*and* injected even without otter); and a buffer you turn into a lab with **`:Bsh!`**
+gets mapped too when its filetype has no parser of its own (prose/notes/scratch) —
+never a real code filetype, so a `:Bsh!` python/lua file is left untouched. Requires
 the `markdown` (and your fence languages, e.g. `python`) treesitter parsers.
+
+otter only activates once it sees a fence in one of its languages, so a doc you
+open with *no* ` ```python ` block yet starts dormant — bsh re-checks on edits and
+wires it up the moment you add the first one (no save or reopen needed).
+
+#### Formatting fenced code
+
+otter can't format (see above), but [conform.nvim](https://github.com/stevearc/conform.nvim)'s
+`injected` formatter is built for exactly this: it reads the same treesitter
+injections, runs each language's real formatter on the fenced code, and writes the
+result back (handling indentation and multiple fences for you). bsh already exposes
+` ```python ` as a markdown injection, so you just point conform's `injected`
+formatter at it:
+
+```lua
+require("conform").setup({
+  formatters_by_ft = {
+    bsh      = { "injected" },  -- the dedicated *.bsh filetype
+    markdown = { "injected" },  -- *.bsh.md (and any markdown with code fences)
+  },
+  -- which formatter the injected blocks use per language:
+  formatters = { injected = { options = { lang_to_formatters = { python = { "ruff_format" } } } } },
+})
+-- your existing format mapping then reformats the fence under the cursor:
+vim.keymap.set("n", "<leader>gl", function() require("conform").format() end)
+```
 
 ### Run keys: inline vs a side buffer
 

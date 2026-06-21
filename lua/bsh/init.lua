@@ -391,6 +391,17 @@ function M.attach(buf)
   -- typst comments are `//` (markdown/prose buffers use HTML comments) -- the
   -- comment style is also how a `% cmd` trigger is hidden from the typeset PDF.
   vim.bo[buf].commentstring = vim.b[buf].bsh_typst and "// %s" or "<!-- %s -->"
+
+  -- A `bsh` buffer is a markdown-fenced doc: point treesitter at the markdown parser
+  -- so the fenced code is highlighted AND exposed as a treesitter *injection* -- what
+  -- otter (LSP) and conform.nvim's `injected` formatter both read. Only the dedicated
+  -- `bsh` filetype needs this (`.bsh.md` is already markdown; `.bsh.typ` stays typst);
+  -- foreign `:Bsh!` filetypes are mapped, guarded, in bsh.otter. Unconditional (not
+  -- otter-gated) so highlighting/formatting work even with config.otter off.
+  if vim.bo[buf].filetype == "bsh" and not vim.b[buf].bsh_typst then
+    pcall(vim.treesitter.language.register, "markdown", "bsh")
+    pcall(vim.treesitter.start, buf)
+  end
   -- fold each result fence; start fully open (za on the trigger toggles one)
   vim.api.nvim_buf_call(buf, function()
     vim.opt_local.foldmethod = "expr"
