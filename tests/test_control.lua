@@ -51,6 +51,16 @@ T["reset_session is a no-op (false) when there is no session"] = function()
   eq(bufeval(child, "require('bsh.session').reset_session(b, 'sh', '')"), false)
 end
 
+T["interrupt is refused on a remote session (reset is the recovery)"] = function()
+  H.bootstrap(child, { name = "rr.bsh", lines = { "```python loc@x%%", "z = 1", "```" } })
+  child.lua("require('bsh').transports.loc = { 'sh', '-lc', '{cmd}' }")
+  H.run(child, H.rowof(child, "^z = 1$"))
+  -- SIGINT can't reach the far interpreter (only the local ssh/transport client),
+  -- so a remote session always refuses interrupt -- but reset restarts it cleanly.
+  eq(bufeval(child, "require('bsh.session').interrupt_session(b, 'python', 'loc@x')"), false)
+  eq(bufeval(child, "require('bsh.session').reset_session(b, 'python', 'loc@x')"), true)
+end
+
 T["interrupt_session is false when idle, list/reset_all track sessions"] = function()
   H.bootstrap(child, { name = "i.bsh", lines = { "%% true" } })
   H.run(child, H.rowof(child, "^%%%% true$"))

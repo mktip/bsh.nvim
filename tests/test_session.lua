@@ -49,4 +49,24 @@ T["a session composes over a user-defined transport"] = function()
   eq(badge(0):find("loc@x:", 1, true) ~= nil, true) -- badge shows the route as a prompt
 end
 
+T["a one-shot python cell routes over a transport (`python loc@x%`)"] = function()
+  H.bootstrap(child, { name = "rp.bsh", lines = { "```python loc@x%", "print('oneshot')", "```" } })
+  child.lua("require('bsh').transports.loc = { 'sh', '-lc', '{cmd}' }")
+  H.run(child, H.rowof(child, "print%('oneshot'%)"))
+  eq(H.rowof(child, "^oneshot$") ~= nil, true)
+end
+
+T["python %% composes over a transport: globals persist (`python loc@x%%`)"] = function()
+  H.bootstrap(child, {
+    name = "rps.bsh",
+    lines = { "```python loc@x%%", "g = 6", "```", "", "```python loc@x%%", "print('g*g =', g*g)", "```" },
+  })
+  -- the same route path as the sh session, but the python DRIVER is what's run on
+  -- the far side -- its length-prefixed stdin protocol flowing over the transport.
+  child.lua("require('bsh').transports.loc = { 'sh', '-lc', '{cmd}' }")
+  H.run(child, H.rowof(child, "^g = 6$"))
+  H.run(child, H.rowof(child, "print%('g%*g"))
+  eq(H.rowof(child, "^g%*g = 36$") ~= nil, true)
+end
+
 return T

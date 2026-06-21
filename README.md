@@ -38,6 +38,7 @@ session, no marker is inert (so plain code blocks stay dead).
 | `docker@id%% cmd` | a *persistent* shell inside it — `%%` composes over any route |
 | ` ```%% … ``` ` | multiline block, `<CR>` anywhere inside runs it all |
 | ` ```python % ` / ` ```python %% ` | Python, one-shot or a stateful session |
+| ` ```python user@host% ` / ` ```python user@host%% ` | Python on a remote host (routes like the shell does) |
 | `: path` | navigable directory listing (`<CR>` drills in / opens files) |
 | `: goto query` | fuzzy-jump to a directory, then list it |
 | `https://…` | open the URL in your browser |
@@ -136,7 +137,9 @@ vim.keymap.set("n", "<leader>gl", function() require("conform").format() end)
 > SIGINT reaches the foreground *child* of a session shell (it has no job
 > control), so a runaway **external command** stops cleanly. A pure shell-builtin
 > loop with no child process (e.g. `while true; do :; done`) can't be interrupted
-> that way — reset the session instead.
+> that way — reset the session instead. **Remote** sessions (`user@host%%`) can't be
+> interrupted at all — `<C-c>` would only signal the local ssh client — so they're
+> reset-only too.
 
 ### `$BSH_HOME` — a command namespace
 
@@ -187,7 +190,14 @@ web@prod % uname -a            # plain ssh (unchanged)
 ```
 
 `%%` sessions ride the *same* route, so a persistent shell works over any
-transport, not just ssh. Each `%%` cell shows a small **cwd badge** at end of line
+transport, not just ssh. **Python rides it too** — ` ```python web@prod% ` runs a
+one-shot interpreter on `prod`, and ` ```python web@prod%% ` is a *persistent*
+remote Python whose globals/imports survive across cells (the interpreter runs on
+the far side; its cells stream over the hop). One caveat: `<C-c>` interrupt can't
+reach a *remote* interpreter (it'd only signal the local ssh client), so a remote
+session is **reset-only** — `<C-k>`/`:BshReset` restarts it with a fresh interpreter.
+
+Each `%%` cell shows a small **cwd badge** at end of line
 (`web@prod:/srv`) read from the shell's own `$PWD` — so it's right through `cd`,
 dynamic paths, and subshells, where parsing the command never could be. Note it's
 a *last-ran-here* marker, not a live prompt: it records where **that** cell ran,

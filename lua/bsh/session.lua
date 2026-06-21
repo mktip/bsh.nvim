@@ -78,7 +78,15 @@ local SPECS = {
     end,
   },
   python = {
-    argv = function(token, _) return { config.python, "-u", "-c", (DRIVER_PY:gsub("@TOKEN@", token)) } end,
+    -- local: the interpreter directly. remote (`python user@host%%`): the SAME
+    -- driver, routed through the engine so its length-prefixed stdin protocol
+    -- flows over ssh -T (binary-clean, stdin kept open) -- a persistent remote
+    -- Python whose globals survive across cells, exactly like the local one.
+    argv = function(token, target)
+      local driver = DRIVER_PY:gsub("@TOKEN@", token)
+      if target == "" then return { config.python, "-u", "-c", driver } end
+      return job.build_argv(target, config.python .. " -u -c " .. vim.fn.shellescape(driver))
+    end,
     init = function() end,
     send = function(s, code) -- length-prefixed chunk: header line + exact bytes
       vim.fn.chansend(s.job, tostring(#code) .. "\n" .. code)
@@ -241,7 +249,14 @@ end
 -- waiting on stdin would escape its read loop and kill it). Returns true if a
 -- signal was sent. The session keeps running; its sentinel arrives normally, so
 -- the cell fills with whatever it produced plus the interrupt's exit note.
+--
+-- REMOTE sessions (`target ~= ""`) are deliberately skipped: the process we can
+-- signal locally is the ssh client, not the interpreter on the far side, so a
+-- SIGINT would tear the whole session down instead of interrupting one command.
+-- Returns false so the caller can steer the user to `:BshReset` (a fresh remote
+-- interpreter) -- the only clean recovery until we forward signals over the hop.
 function M.interrupt_session(buf, lang, target)
+  if target ~= "" then return false end
   local s = sessions[buf] and sessions[buf][skey(lang, target)]
   if not (s and s.busy) then return false end
   pcall(interrupt_proc, s)

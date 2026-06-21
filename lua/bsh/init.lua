@@ -142,12 +142,12 @@ local function execute_cell(to_buf)
       else
         run_shell(buf, fc.close, fc.indent, fc.target, fc.body, to_buf)
       end
-    elseif fc.target ~= "" then
-      vim.notify("bsh: remote " .. fc.lang .. " cells aren't supported yet",
-        vim.log.levels.WARN)
-    elseif fc.session then
-      run_session(buf, fc.lang, "", fc.close, fc.indent, fc.body, to_buf, fc.open)
-    else -- one-shot interpreter run
+    elseif fc.session then -- persistent interpreter, local or remote (`python user@host%%`)
+      run_session(buf, fc.lang, fc.target, fc.close, fc.indent, fc.body, to_buf, fc.open)
+    elseif fc.target ~= "" then -- one-shot on a remote host: route the interpreter through ssh
+      run_oneshot(buf, fc.close, fc.indent,
+        build_argv(fc.target, config.python .. " -c " .. vim.fn.shellescape(fc.body)), to_buf)
+    else -- one-shot local interpreter
       run_oneshot(buf, fc.close, fc.indent, { config.python, "-c", fc.body }, to_buf)
     end
     return true
@@ -341,10 +341,16 @@ local function cancel_here()
     vim.notify("bsh: interrupted " .. session_label(c) .. " session (SIGINT)")
     return
   end
+  -- a remote session under the cursor: SIGINT can't reach the far interpreter
+  -- (only the local ssh client), so steer to reset rather than silently no-op.
+  if c and c.target ~= "" then
+    vim.notify("bsh: can't interrupt a remote session — :BshReset to restart it",
+      vim.log.levels.WARN)
+    return
+  end
   local busy = {}
   for _, s in ipairs(session.list_sessions(buf)) do if s.busy then busy[#busy + 1] = s end end
-  if #busy == 1 then
-    session.interrupt_session(buf, busy[1].lang, busy[1].target)
+  if #busy == 1 and session.interrupt_session(buf, busy[1].lang, busy[1].target) then
     vim.notify("bsh: interrupted " .. session_label(busy[1]) .. " session (SIGINT)")
     return
   end
