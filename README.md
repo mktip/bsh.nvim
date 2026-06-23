@@ -1,5 +1,7 @@
 # bsh.nvim
 
+> HIGHLY EXPERIMENTAL, AI WRITTEN, YET TO BE REVIEWED
+
 **Buffer SHell** — a shell that lives in a Neovim buffer instead of a terminal.
 
 A regular terminal is append-only: you can't go back and re-run a command in
