@@ -1,13 +1,13 @@
 # bsh.nvim
 
 > HIGHLY EXPERIMENTAL, AI WRITTEN, YET TO BE REVIEWED
+> and if you already viewing this file in neovim with bsh installed, call :Bsh!
 
 **Buffer SHell**: a shell that lives in a Neovim buffer instead of a terminal.
 
-
 In a neovim buffer, imagine if you type
 
-% pwd # and you <CR> here
+% pwd # and you \<CR> here
 ```out
 /home/mktips/pockt/bsh.nvim
 ```
@@ -23,7 +23,7 @@ Linux
 
 or with an extremely long output
 
-% cat /proc/cpuinfo # <CTRL>+<CR> to redirect and open the output in a scratch buffer
+% cat /proc/cpuinfo # \<CTRL>+\<CR> to redirect and open the output in a scratch buffer
 ```log
 bsh://out/README.bsh.md/1  ·  447 lines  ·  exit 0  ·  <CR> open
 ```
@@ -56,6 +56,7 @@ If you want a persistent session
 /tmp
 ```
 
+---
 
 You can also explore files (yes remote ones too)
 
@@ -115,8 +116,10 @@ init.lua
 > structured output later on (instead of relying on the `tree` command and
 > adhoc parsing.)
 
+---
 
 ```python %
+# you can't see it, but above, the codeblock starts with \`\`\`python %
 print("Works")
 ```
 ```out
@@ -124,6 +127,7 @@ Works
 ```
 
 ```python mktips@simurgh-base%
+# this time \`\`\`python mktips@simurgh-base%
 print("Across the oceans")
 ```
 ```out
@@ -131,6 +135,7 @@ Across the oceans
 ```
 
 ```python %%
+# and here \`\`\`python %%
 import os
 ```
 ```out
@@ -139,6 +144,7 @@ import os
 
 
 ```python %%
+# likewise \`\`\`python %% (sharing the same python session/env)
 os.system("cowsay persistantly")
 ```
 ```out
@@ -153,16 +159,29 @@ os.system("cowsay persistantly")
 ```
 
 
->> Hey, AI man, what animal is that?
+>> Hey, AI man, what animal is that? # (">>" to invoke an llm call with the prior cell as input)
 ```agent
 That is an ASCII art **cow**!
 ```
 
 
-llm.tools.reverse !sdnammoc motsuc gniniatnoc seunem nwo ruoy enifed neve nac uoy
+demo.reverse !sdnammoc motsuc gniniatnoc seunem nwo ruoy enifed neve nac uoy
 ```out
 you can even define your own menues containing custom commands!
 ```
+
+## Motive
+
+I'm frustrated with how uneditable the regular shell interface is, and one must
+rely on terminal creators to support any form of intractability with the shell
+outputs (highlighting urls, reverse output search, scroll). What if my shell,
+was an nvim buffer, where i can search, edit, do all the nvim magic my heart
+desires? I want to edit my terminal window however I like, and that's what this
+project provides me. (although I do lose... interactive commands, shell
+history, and... many other things, alas.. hopefully temporarily.. temporarily..)
+
+(A secondary benefit is that I can share my shell sessions as markdown files (and
+hopefully soon, nicely formatted typst documents (pdf, html (maybe), etc))
 
 ## Install
 
@@ -190,9 +209,7 @@ demand with `:Bsh!`; `:Bsh` opens a fresh scratch one.
 
 ## Credits
 
-[Xiki](https://xiki.org/)
-[Plan9](https://en.wikipedia.org/wiki/Plan_9_from_Bell_Labs)
-[Emacs nerds](somewhere)
+[Xiki (seems dead)](https://youtu.be/bUR_eUVcABg), [Plan9](https://en.wikipedia.org/wiki/Plan_9_from_Bell_Labs), [Emacs nerds](somewhere)
 
 ## License
 
