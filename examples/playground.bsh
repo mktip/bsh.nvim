@@ -7,40 +7,40 @@ a result block. This file is a `.bsh`, so cells are live the moment you open it.
 
 ## one-shot shell   (<CR> = inline output; <C-CR> or g<CR> = output to a side buffer)
 
-$ echo "hello from a fresh shell"; uname -s
+% echo "hello from a fresh shell"; uname -s
 
 ## try g<CR> on the next line: output goes to a bsh://out buffer, <CR> the ref to open it
 
-$ for i in $(seq 5); do echo "line $i"; done
+% for i in $(seq 5); do echo "line $i"; done
 
 
 ## persistent session -- env / cwd carry across cells
 
-$$ export GREETING=hi; cd /tmp
-$$ echo "$GREETING from $(pwd)"
+%% export GREETING=hi; cd /tmp
+%% echo "$GREETING from $(pwd)"
 
 
 ## multiline (run <CR> anywhere inside the fence)
 
-```$$
+```%%
 for i in 1 2 3; do
   echo "line $i"
 done
 ```
 
 
-## python -- one-shot ($) vs session ($$)
+## python -- one-shot (%) vs session (%%)
 
-```python $
+```python %
 print("one-shot:", 2 ** 10)
 ```
 
-```python $$
+```python %%
 import math
 r = 3
 ```
 
-```python $$
+```python %%
 print("area =", round(math.pi * r * r, 2))   # sees r + math from the cell above
 ```
 
@@ -66,13 +66,11 @@ llm.tools.reverse hello
 ## define/edit a command in place: foo.bar! opens its source
 ## (scaffolds a new executable, after a confirm, if it doesn't exist yet)
 
-llm.tools.weather!
+demo.weather!
 
-llm.tools
+demo.
 
-host
-
-demo.hello
+demo.menu
 
 demo.greet
 
