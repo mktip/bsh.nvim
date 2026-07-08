@@ -56,15 +56,15 @@ end
 
 -- Parse one fold-tree body line into (depth, name, is_dir, expanded). Depth =
 -- leading-space count / 2 (2 spaces per nesting level). A directory carries a
--- fold marker, `▸` collapsed / `▾` expanded; a file is bare `<indent>name`
+-- fold marker, `+` collapsed / `-` expanded; a file is bare `<indent>name`
 -- (no marker). Blank/whitespace-only lines -> nil (not an entry).
 function M.fold_entry(line)
   local indent, rest = line:match("^( *)(.*)$")
   if rest == "" then return nil end
   local depth = math.floor(#indent / 2)
-  local name = rest:match("^▸%s(.+)$")
+  local name = rest:match("^%+%s(.+)$")
   if name then return depth, name, true, false end
-  name = rest:match("^▾%s(.+)$")
+  name = rest:match("^%-%s(.+)$")
   if name then return depth, name, true, true end
   return depth, rest, false, nil
 end

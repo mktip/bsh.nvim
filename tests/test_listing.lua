@@ -40,8 +40,8 @@ T["initial -T render: collapsed dirs first, then files, no recursion"] = functio
     ": " .. tmp .. " -T",
     "```tree",
     "../",
-    "▸ docs/",
-    "▸ src/",
+    "+ docs/",
+    "+ src/",
     "Makefile",
     "README.md",
     "```",
@@ -52,14 +52,14 @@ T["expanding a node splices its children in, flips the marker, siblings untouche
   local tmp = make_tree()
   H.bootstrap(child, { lines = { ": " .. tmp .. " -T" } })
   H.run(child, 1)
-  H.run(child, H.rowof(child, "▸ docs/"))
+  H.run(child, H.rowof(child, "%+ docs/"))
   eq(H.lines(child), {
     ": " .. tmp .. " -T",
     "```tree",
     "../",
-    "▾ docs/",
+    "- docs/",
     "  notes.txt",
-    "▸ src/", -- untouched sibling: still collapsed, still there
+    "+ src/", -- untouched sibling: still collapsed, still there
     "Makefile",
     "README.md",
     "```",
@@ -70,14 +70,14 @@ T["collapsing removes exactly the spliced children and flips the marker back"] =
   local tmp = make_tree()
   H.bootstrap(child, { lines = { ": " .. tmp .. " -T" } })
   H.run(child, 1)
-  H.run(child, H.rowof(child, "▸ docs/")) -- expand
-  H.run(child, H.rowof(child, "▾ docs/")) -- collapse again
+  H.run(child, H.rowof(child, "%+ docs/")) -- expand
+  H.run(child, H.rowof(child, "%- docs/")) -- collapse again
   eq(H.lines(child), {
     ": " .. tmp .. " -T",
     "```tree",
     "../",
-    "▸ docs/",
-    "▸ src/",
+    "+ docs/",
+    "+ src/",
     "Makefile",
     "README.md",
     "```",
@@ -88,28 +88,28 @@ T["a nested dir expands at depth 2, a nested file opens with the reconstructed p
   local tmp = make_tree()
   H.bootstrap(child, { lines = { ": " .. tmp .. " -T" } })
   H.run(child, 1)
-  H.run(child, H.rowof(child, "▸ src/")) -- expand src/ -> lib/ (dir) + main.lua (file)
+  H.run(child, H.rowof(child, "%+ src/")) -- expand src/ -> lib/ (dir) + main.lua (file)
   eq(H.lines(child), {
     ": " .. tmp .. " -T",
     "```tree",
     "../",
-    "▸ docs/",
-    "▾ src/",
-    "  ▸ lib/",
+    "+ docs/",
+    "- src/",
+    "  + lib/",
     "  main.lua",
     "Makefile",
     "README.md",
     "```",
   })
 
-  H.run(child, H.rowof(child, "▸ lib/")) -- expand nested lib/ at depth 2
+  H.run(child, H.rowof(child, "%+ lib/")) -- expand nested lib/ at depth 2
   eq(H.lines(child), {
     ": " .. tmp .. " -T",
     "```tree",
     "../",
-    "▸ docs/",
-    "▾ src/",
-    "  ▾ lib/",
+    "+ docs/",
+    "- src/",
+    "  - lib/",
     "    util.lua",
     "  main.lua",
     "Makefile",
@@ -130,8 +130,8 @@ T["../ still walks up and re-lists at depth 0"] = function()
     ": " .. tmp .. " -T",
     "```tree",
     "../",
-    "▸ docs/",
-    "▸ src/",
+    "+ docs/",
+    "+ src/",
     "Makefile",
     "README.md",
     "```",
@@ -146,8 +146,8 @@ T["-H propagates into child expansions"] = function()
     ": " .. tmp .. " -H -T",
     "```tree",
     "../",
-    "▸ docs/",
-    "▸ src/",
+    "+ docs/",
+    "+ src/",
     ".env",
     "Makefile",
     "README.md",

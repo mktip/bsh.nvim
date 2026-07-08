@@ -31,12 +31,12 @@ local function group_entries(out)
 end
 
 -- Format one level's grouped `ls` output into fold-tree body lines at `depth`
--- (2 spaces per level): directories collapsed (`▸ name/`), files bare.
+-- (2 spaces per level): directories collapsed (`+ name/`), files bare.
 local function format_tree_level(entries, depth)
   local pad = string.rep("  ", depth)
   local lines = {}
   for _, e in ipairs(entries) do
-    lines[#lines + 1] = pad .. (e:sub(-1) == "/" and ("▸ " .. e) or e)
+    lines[#lines + 1] = pad .. (e:sub(-1) == "/" and ("+ " .. e) or e)
   end
   return lines
 end
@@ -175,10 +175,10 @@ function M.fold_path(buf, lo, row, base)
   return join_path(base, table.concat(rel, "/"))
 end
 
--- Toggle a fold-tree directory node in place: collapsed (`▸`) expands by
+-- Toggle a fold-tree directory node in place: collapsed (`+`) expands by
 -- listing that node's absolute path (one level, same grouping as `dir` mode)
 -- and splicing the result directly below it at one deeper indent, then flips
--- the marker to `▾`; expanded (`▾`) collapses by deleting exactly those
+-- the marker to `-`; expanded (`-`) collapses by deleting exactly those
 -- spliced lines (everything below it deeper than its own depth) and flips the
 -- marker back. Siblings are untouched either way -- the whole point over the
 -- old trigger-rewrite `dir` navigation, which replaces the entire listing.
@@ -199,7 +199,7 @@ function M.toggle_tree_node(buf, open, row, target, base, hidden)
       if not d or d <= depth then break end
       stop = stop + 1
     end
-    vim.api.nvim_buf_set_lines(buf, row, stop, false, { pad .. "▸ " .. name })
+    vim.api.nvim_buf_set_lines(buf, row, stop, false, { pad .. "+ " .. name })
     return true
   end
 
@@ -207,7 +207,7 @@ function M.toggle_tree_node(buf, open, row, target, base, hidden)
   if not full then return false end
   local ls = hidden and "ls -1Ap -- " or "ls -1p -- "
   local cwd = target == "" and doc_cwd(buf) or nil
-  vim.api.nvim_buf_set_lines(buf, row, row + 1, false, { pad .. "▾ " .. name, pad .. "  ...listing..." })
+  vim.api.nvim_buf_set_lines(buf, row, row + 1, false, { pad .. "- " .. name, pad .. "  ...listing..." })
   local mark = vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { right_gravity = false })
   local out = {}
   local jb = vim.fn.jobstart(build_argv(target, ls .. qpath(full)), {

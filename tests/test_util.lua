@@ -39,13 +39,13 @@ end
 
 T["fold_entry"] = MiniTest.new_set()
 T["fold_entry"]["collapsed directory at depth 0"] = function()
-  eq({ util.fold_entry("▸ src/") }, { 0, "src/", true, false })
+  eq({ util.fold_entry("+ src/") }, { 0, "src/", true, false })
 end
 T["fold_entry"]["expanded directory at depth 1 (2-space indent)"] = function()
-  eq({ util.fold_entry("  ▾ lib/") }, { 1, "lib/", true, true })
+  eq({ util.fold_entry("  - lib/") }, { 1, "lib/", true, true })
 end
 T["fold_entry"]["collapsed directory at depth 2"] = function()
-  eq({ util.fold_entry("    ▸ nested/") }, { 2, "nested/", true, false })
+  eq({ util.fold_entry("    + nested/") }, { 2, "nested/", true, false })
 end
 T["fold_entry"]["a file has no marker"] = function()
   eq({ util.fold_entry("README.md") }, { 0, "README.md", false, nil })

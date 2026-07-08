@@ -193,16 +193,16 @@ function M.foldexpr(lnum)
   return "0"
 end
 
--- Collapsed cells read as `  ▸ out (N lines)` / `  ▸ dir (N entries)`
+-- Collapsed cells read as `  + out (N lines)` / `  + dir (N entries)`
 -- (N = body lines, fences excluded; tag taken from the opening fence).
 function M.foldtext()
   local open = vim.fn.getline(vim.v.foldstart)
   local indent = open:match("^(%s*)")
-  -- a `#cell(...)` element folds to `▸ % <cmd> (N lines)` (its command, not a tag)
+  -- a `#cell(...)` element folds to `+ % <cmd> (N lines)` (its command, not a tag)
   local cellcmd = open:match('^%s*#cell%(cmd:%s*"(.-)"')
   if cellcmd then
     local n = vim.v.foldend - vim.v.foldstart - 1
-    return indent .. "▸ % " .. cellcmd .. " (" .. n .. (n == 1 and " line)" or " lines)")
+    return indent .. "+ % " .. cellcmd .. " (" .. n .. (n == 1 and " line)" or " lines)")
   end
   local tag = open:match("```(%S+)") or "out"
   local n = vim.v.foldend - vim.v.foldstart - 1
@@ -214,7 +214,7 @@ function M.foldtext()
   else
     unit = n == 1 and " line)" or " lines)"
   end
-  return indent .. "▸ " .. tag .. " (" .. n .. unit
+  return indent .. "+ " .. tag .. " (" .. n .. unit
 end
 
 return M
