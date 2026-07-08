@@ -205,9 +205,14 @@ local function execute_cell(to_buf)
   -- `> instruction` : agentic llm call. The count of leading `>` beyond the
   -- first = how many preceding cells to fold in as context (`>` none, `>>` one,
   -- `>>>` two, …). Output goes in a comment-delimited region below.
-  local gts, instruction = line:match("^%s*(>+)%s+(.+)$")
+  -- An optional `[template]` before the `>`s picks the llm template (default
+  -- config.agent_template); a trailing `!` on the `>`s shows tool calls (`--td`).
+  local gtpl, gts, gbang, instruction = line:match("^%s*%[([%w_%-]+)%](>+)(!?)%s+(.+)$")
+  if not instruction then
+    gts, gbang, instruction = line:match("^%s*(>+)(!?)%s+(.+)$")
+  end
   if instruction then
-    run_agent(buf, trow, indent, instruction, #gts - 1)
+    run_agent(buf, trow, indent, instruction, #gts - 1, gtpl, gbang == "!")
     return true
   end
 
@@ -328,6 +333,71 @@ local function session_label(c)
   return (c.target ~= "" and (c.target .. " ") or "") .. c.lang
 end
 
+-- Collect, in DOCUMENT ORDER, every session cell at or above `upto` whose
+-- (lang, target) matches `want` -- the units that, replayed in sequence, rebuild
+-- the state a far-down cell depends on. Two shapes carry a session: a ```lang %%``
+-- input fence and an inline `%%`/`target%% cmd` line (always `sh`). We walk
+-- top-down, skipping each fenced block as a whole (by its closing ```), so an
+-- ```out result body that happens to contain a `%`-looking line is never mistaken
+-- for a trigger. Each entry mirrors the args run_session takes.
+local function collect_session_cells(buf, upto, want)
+  local total = vim.api.nvim_buf_line_count(buf)
+  local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
+  local m = vim.pesc(config.marker)
+  local cells, r = {}, 0
+  while r <= upto and r < total do
+    local line = gl(r)
+    if line:match("^%s*```%S") then
+      -- an opening fence: find its closer and skip the whole block either way
+      local close = total - 1
+      for rr = r + 1, total - 1 do
+        if gl(rr):match("^%s*```%s*$") then close = rr; break end
+      end
+      local lang, target, sess = parse_runmarker(vim.trim(line:match("^%s*```(.*)$") or ""), config.marker)
+      if lang and sess and lang == want.lang and target == want.target then
+        cells[#cells + 1] = {
+          trow = close, prow = r, indent = line:match("^(%s*)"),
+          cmd = table.concat(vim.api.nvim_buf_get_lines(buf, r + 1, close, false), "\n"),
+        }
+      end
+      r = close + 1
+    else
+      -- an inline session line is always `sh`; only collect when that's wanted
+      local stgt, sdbl, scmd = line:match("^%s*(%S-)(" .. m .. m .. "?)%s+(.+)$")
+      if scmd and sdbl == config.marker .. config.marker
+          and want.lang == "sh" and stgt == want.target then
+        cells[#cells + 1] = { trow = r, prow = r, indent = line:match("^(%s*)"), cmd = scmd }
+      end
+      r = r + 1
+    end
+  end
+  return cells
+end
+
+-- :BshReplay / <localleader>r — replay this session from the top THROUGH the cell
+-- under the cursor, into a FRESH interpreter. We reset the session first (so the
+-- replay starts from clean state) then enqueue every matching cell in document
+-- order; session.lua's FIFO pump runs them one after another, each filling its own
+-- fence as it completes. The point: after a :BshReset (or reopening the file) a
+-- far-down cell depends on imports/vars/`cd` from earlier cells that no longer
+-- live in the interpreter -- this rebuilds them in one keystroke.
+local function replay_session()
+  local buf = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local c = classify_session(buf, row)
+  if not c then
+    vim.notify("bsh: put the cursor on a session (%% / ```%% ) cell to replay", vim.log.levels.WARN)
+    return
+  end
+  local cells = collect_session_cells(buf, row, c)
+  if #cells == 0 then return end
+  session.reset_session(buf, c.lang, c.target) -- replay into a clean interpreter
+  for _, cell in ipairs(cells) do
+    run_session(buf, c.lang, c.target, cell.trow, cell.indent, cell.cmd, false, cell.prow)
+  end
+  vim.notify(("bsh: replaying %d %s cell%s"):format(#cells, session_label(c), #cells == 1 and "" or "s"))
+end
+
 -- <C-c> / :BshCancel — cancel the running cell under the cursor. A one-shot
 -- (`$`/`%`) is stopped outright; a session cell's running command is INTERRUPTED
 -- (SIGINT) so the session itself survives. Falls back to the sole busy session in
@@ -445,6 +515,14 @@ function M.attach(buf)
     { desc = "cancel the running cell under the cursor" })
   vim.api.nvim_buf_create_user_command(buf, "BshReset", function(o) reset_here(o.bang) end,
     { bang = true, desc = "reset the session for the cell under the cursor (! = all in buffer)" })
+
+  -- <localleader>r / :BshReplay — replay this session from the top through the
+  -- cell under the cursor, into a fresh interpreter (resets first, then re-runs
+  -- every matching session cell in document order).
+  vim.keymap.set("n", "<localleader>r", replay_session,
+    { buffer = buf, desc = "bsh: replay the session up to (and incl.) the cell under the cursor" })
+  vim.api.nvim_buf_create_user_command(buf, "BshReplay", function() replay_session() end,
+    { desc = "replay this session from the top through the cell under the cursor (fresh interpreter)" })
 
   -- optional: real LSP inside ```python fences via otter.nvim. No-op when otter
   -- isn't installed or config.otter is off (see lua/bsh/otter.lua).

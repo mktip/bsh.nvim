@@ -164,6 +164,11 @@ os.system("cowsay persistantly")
 That is an ASCII art **cow**!
 ```
 
+> `[template]` before the `>`s picks which `llm` template to call (default:
+> `config.agent_template`, "web"); a trailing `!` on the `>`s shows tool calls
+> (`--td`). E.g. `[papers]>>! find papers on X` = "papers" template, 1 prior
+> cell as context, tool calls shown.
+
 
 demo.reverse !sdnammoc motsuc gniniatnoc seunem nwo ruoy enifed neve nac uoy
 ```out

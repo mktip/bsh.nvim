@@ -30,7 +30,8 @@ local function cell_above(buf, from)
   local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
   local function looks_trigger(s)
     return s:match("^%S-" .. vim.pesc(config.marker) .. "%s") or s:match("^%S-:%s")
-        or s:match("^https?://") or s:match("^>+%s")
+        or s:match("^https?://") or s:match("^>+!?%s")
+        or s:match("^%[[%w_%-]+%]>+!?%s")
   end
   local r = from
   while r >= 0 and gl(r):match("^%s*$") do r = r - 1 end
@@ -77,15 +78,19 @@ end
 
 -- `> instruction` : agentic llm call. The number of leading `>` beyond the first
 -- picks how many preceding cells to include: `>` = none, `>>` = 1, `>>>` = 2, …
-function M.run_agent(buf, trow, indent, instruction, ncontext)
+-- An optional `[template]` before the `>`s overrides config.agent_template;
+-- a trailing `!` on the `>`s requests `--td` (show tool calls).
+function M.run_agent(buf, trow, indent, instruction, ncontext, template, show_tools)
   local context = gather_context(buf, trow, ncontext)
   local prompt = instruction
   if context and context ~= "" then
     prompt = prompt .. "\n\n--- preceding cells (context) ---\n" .. context
   end
+  local argv = { "llm", "-t", template or config.agent_template, "--chain-limit", "15" }
+  if show_tools then argv[#argv + 1] = "--td" end
+  argv[#argv + 1] = prompt
   local mark = stage_fence(buf, trow, indent, "agent", "...thinking...")
-  run_job(buf, indent, mark,
-    { "llm", "-t", config.agent_template, "--chain-limit", "15", prompt },
+  run_job(buf, indent, mark, argv,
     doc_cwd(buf), agent_transform, agent_sanitize) -- sanitize the live preview too
 end
 
