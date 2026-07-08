@@ -54,18 +54,19 @@ function M.join_path(base, name)
   return base .. "/" .. name
 end
 
--- Parse one `tree -F` body line into (depth, name). The connector `├── `/`└── `
--- (and the `│   `/`    ` indent groups) are multibyte, so match the literal
--- connector and measure depth by display columns (each level = 4 columns).
-function M.tree_entry(line)
-  for _, conn in ipairs({ "├── ", "└── " }) do
-    local i = line:find(conn, 1, true)
-    if i then
-      local depth = math.floor(vim.fn.strdisplaywidth(line:sub(1, i - 1)) / 4) + 1
-      return depth, line:sub(i + #conn)
-    end
-  end
-  return nil -- root line / summary / blank: not an entry
+-- Parse one fold-tree body line into (depth, name, is_dir, expanded). Depth =
+-- leading-space count / 2 (2 spaces per nesting level). A directory carries a
+-- fold marker, `▸` collapsed / `▾` expanded; a file is bare `<indent>name`
+-- (no marker). Blank/whitespace-only lines -> nil (not an entry).
+function M.fold_entry(line)
+  local indent, rest = line:match("^( *)(.*)$")
+  if rest == "" then return nil end
+  local depth = math.floor(#indent / 2)
+  local name = rest:match("^▸%s(.+)$")
+  if name then return depth, name, true, false end
+  name = rest:match("^▾%s(.+)$")
+  if name then return depth, name, true, true end
+  return depth, rest, false, nil
 end
 
 -- A fence info-string's run marker -> (lang, target, session). Drives which

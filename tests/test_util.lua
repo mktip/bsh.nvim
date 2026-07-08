@@ -37,6 +37,25 @@ T["parse_list_args"]["peels -T and -H, keeps the path"] = function()
   eq({ util.parse_list_args("") }, { ".", { tree = false, hidden = false } })
 end
 
+T["fold_entry"] = MiniTest.new_set()
+T["fold_entry"]["collapsed directory at depth 0"] = function()
+  eq({ util.fold_entry("▸ src/") }, { 0, "src/", true, false })
+end
+T["fold_entry"]["expanded directory at depth 1 (2-space indent)"] = function()
+  eq({ util.fold_entry("  ▾ lib/") }, { 1, "lib/", true, true })
+end
+T["fold_entry"]["collapsed directory at depth 2"] = function()
+  eq({ util.fold_entry("    ▸ nested/") }, { 2, "nested/", true, false })
+end
+T["fold_entry"]["a file has no marker"] = function()
+  eq({ util.fold_entry("README.md") }, { 0, "README.md", false, nil })
+  eq({ util.fold_entry("  main.lua") }, { 1, "main.lua", false, nil })
+end
+T["fold_entry"]["blank/whitespace-only line -> nil"] = function()
+  eq({ util.fold_entry("") }, {})
+  eq({ util.fold_entry("   ") }, {})
+end
+
 T["join_path"] = MiniTest.new_set()
 T["join_path"]["joins, normalises, walks up on .."] = function()
   eq(util.join_path("/a/b", "c"), "/a/b/c")

@@ -25,9 +25,9 @@ T["resolves a dotted name and runs it (shebang dispatch)"] = function()
   eq(out:match("hello from demo%.hello") ~= nil, true)
 end
 
-T["forwards args (nested leaf)"] = function()
+T["forwards args to the leaf"] = function()
   H.bootstrap(child, {})
-  local out = run(bsh() .. " llm.tools.reverse 'abc def'")
+  local out = run(bsh() .. " demo.reverse 'abc def'")
   eq(out:match("fed cba") ~= nil, true) -- reverse of "abc def"
 end
 
@@ -52,9 +52,9 @@ end
 
 T["a directory runs its .enter"] = function()
   H.bootstrap(child, {})
-  local out, code = run(bsh() .. " host") -- examples/bsh-home/host/.enter
+  local out, code = run(bsh() .. " demo.greet") -- examples/bsh-home/demo/greet/.enter
   eq(code, 0)
-  eq(out:match("host:") ~= nil, true)
+  eq(out:match("greetings from the demo%.greet namespace folder") ~= nil, true)
 end
 
 T["an unresolved name errors with 127"] = function()

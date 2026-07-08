@@ -5,21 +5,21 @@ local child = H.child()
 local T = H.set(child)
 
 T["a leaf runs by shebang into an out fence"] = function()
-  H.bootstrap(child, { lines = { "llm.tools.weather" } })
+  H.bootstrap(child, { lines = { "demo.weather" } })
   H.run(child, 1)
-  eq(H.lines(child), { "llm.tools.weather", "```out", "Istanbul: partly cloudy, 21°C, wind 12 km/h", "```" })
+  eq(H.lines(child), { "demo.weather", "```out", "Istanbul: partly cloudy, 21°C, wind 12 km/h", "```" })
 end
 
 T["inline args reach the leaf"] = function()
-  H.bootstrap(child, { lines = { "llm.tools.reverse hello" } })
+  H.bootstrap(child, { lines = { "demo.reverse hello" } })
   H.run(child, 1)
-  eq(H.lines(child), { "llm.tools.reverse hello", "```out", "olleh", "```" })
+  eq(H.lines(child), { "demo.reverse hello", "```out", "olleh", "```" })
 end
 
 T["args go through the shell (sub-shell expansion)"] = function()
-  H.bootstrap(child, { lines = { 'llm.tools.reverse "$(echo abc)"' } })
+  H.bootstrap(child, { lines = { 'demo.reverse "$(echo abc)"' } })
   H.run(child, 1)
-  eq(H.lines(child), { 'llm.tools.reverse "$(echo abc)"', "```out", "cba", "```" })
+  eq(H.lines(child), { 'demo.reverse "$(echo abc)"', "```out", "cba", "```" })
 end
 
 T["a dir with .enter runs it; trailing dot lists instead"] = function()
@@ -35,22 +35,26 @@ end
 T["plain dir canonicalises to a trailing-dot listing"] = function()
   H.bootstrap(child, { lines = { "demo" } })
   H.run(child, 1)
-  eq(H.lines(child), { "demo.", "```dir", "../", "greet/", "conn.sh", "hello.sh", "menu.sh", "```" })
+  eq(H.lines(child),
+    { "demo.", "```dir", "../", "greet/", "conn.sh", "hello.sh", "lorem.sh", "menu.sh", "reverse.py", "weather.py",
+      "```" })
 end
 
 T["drilling a namespace listing stays dotted (no double dot)"] = function()
-  H.bootstrap(child, { lines = { "llm." } })
+  H.bootstrap(child, { lines = { "demo." } })
   H.run(child, 1)
-  H.run(child, H.rowof(child, "tools/")) -- drill into tools/
-  eq(H.lines(child), { "llm.tools.", "```dir", "../", "reverse.py", "weather.py", "```" })
+  H.run(child, H.rowof(child, "greet/")) -- drill into greet/
+  eq(H.lines(child), { "demo.greet.", "```dir", "../", ".enter", "```" })
 end
 
 T["tag change replaces the old fence (no orphan)"] = function()
-  H.bootstrap(child, { lines = { "llm.tools.reverse hi" } })
+  H.bootstrap(child, { lines = { "demo.reverse hi" } })
   H.run(child, 1)
-  child.lua("vim.api.nvim_buf_set_lines(0, 0, 1, false, { 'llm.tools' })")
+  child.lua("vim.api.nvim_buf_set_lines(0, 0, 1, false, { 'demo' })")
   H.run(child, 1)
-  eq(H.lines(child), { "llm.tools.", "```dir", "../", "reverse.py", "weather.py", "```" })
+  eq(H.lines(child),
+    { "demo.", "```dir", "../", "greet/", "conn.sh", "hello.sh", "lorem.sh", "menu.sh", "reverse.py", "weather.py",
+      "```" })
 end
 
 T["exit-150 output becomes a ```menu fence, drillable on plain <CR>"] = function()
@@ -83,11 +87,11 @@ T["exit-151 emits a cell: drilling replaces the trigger + fence"] = function()
 end
 
 T["a non-menu (exit 0) command's `out` lines are inert on <CR>"] = function()
-  H.bootstrap(child, { lines = { "llm.tools.reverse hi" } })
+  H.bootstrap(child, { lines = { "demo.reverse hi" } })
   H.run(child, 1)
-  eq(H.lines(child), { "llm.tools.reverse hi", "```out", "ih", "```" })
+  eq(H.lines(child), { "demo.reverse hi", "```out", "ih", "```" })
   H.run(child, H.rowof(child, "^ih$")) -- not a menu fence: <CR> doesn't drill
-  eq(H.lines(child), { "llm.tools.reverse hi", "```out", "ih", "```" })
+  eq(H.lines(child), { "demo.reverse hi", "```out", "ih", "```" })
 end
 
 T["foo.bar! scaffolds an executable leaf, then it runs"] = function()

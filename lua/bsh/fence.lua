@@ -207,7 +207,7 @@ function M.foldtext()
   local tag = open:match("```(%S+)") or "out"
   local n = vim.v.foldend - vim.v.foldstart - 1
   local unit
-  if tag == "dir" then
+  if tag == "dir" or tag == "tree" then
     unit = n == 1 and " entry)" or " entries)"
   elseif tag == "menu" then
     unit = n == 1 and " item)" or " items)"

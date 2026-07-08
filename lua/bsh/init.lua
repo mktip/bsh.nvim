@@ -22,7 +22,7 @@ local M = {}
 
 local util = require("bsh.util")
 local join_path, parse_list_args, qpath = util.join_path, util.parse_list_args, util.qpath
-local tree_entry, parse_runmarker = util.tree_entry, util.parse_runmarker
+local fold_entry, parse_runmarker = util.fold_entry, util.parse_runmarker
 
 local fence = require("bsh.fence")
 local ns, inflight = fence.ns, fence.inflight
@@ -47,8 +47,9 @@ M.stop_session = session.stop_session -- re-export (BufWipeout autocmd uses requ
 local run_agent = require("bsh.agent").run_agent
 
 local listing = require("bsh.listing")
-local run_list, open_entry, fence_open, tree_path, open_url =
-    listing.run_list, listing.open_entry, listing.fence_open, listing.tree_path, listing.open_url
+local run_list, open_entry, fence_open, fold_path, toggle_tree_node, open_url =
+    listing.run_list, listing.open_entry, listing.fence_open, listing.fold_path, listing.toggle_tree_node,
+    listing.open_url
 
 local namespace = require("bsh.namespace")
 local ns_home, run_namespace, edit_namespace =
@@ -263,22 +264,40 @@ local function execute_cell(to_buf)
     end
     local base, flags = parse_list_args(trest)
 
-    local full, isdir
+    -- `tree` fences fold in place: a directory node toggles (expand splices
+    -- its children below it at one deeper indent; collapse removes them),
+    -- siblings untouched -- only `../` (always depth 0) still rewrites the
+    -- trigger and re-lists, same as `dir` mode's walk-up.
     if tag == "tree" then
-      full, isdir = tree_path(buf, open + 1, trow, base)
-      if not full then return false end -- root/summary/blank line
-    else
-      local entry = (line:gsub("^%s+", "")):gsub("%s+$", "")
-      if entry == "" then return false end
-      isdir = entry:sub(-1) == "/"
-      full = join_path(base, isdir and entry:sub(1, -2) or entry)
+      if vim.trim(line) == "../" then
+        local tindent = trig:match("^(%s*)")
+        local suffix = (flags.tree and " -T" or "") .. (flags.hidden and " -H" or "")
+        local full = join_path(base, "..")
+        local newtrig = tindent .. (ttarget ~= "" and (ttarget .. ": ") or ": ") .. full .. suffix
+        vim.api.nvim_buf_set_lines(buf, open - 1, open, false, { newtrig })
+        run_list(buf, open - 1, tindent, ttarget, full .. suffix)
+        return true
+      end
+      local depth, name, is_dir = fold_entry(line)
+      if not depth then return false end -- blank line: not an entry
+      if is_dir then
+        toggle_tree_node(buf, open, trow, ttarget, base, flags.hidden)
+      else
+        local full = fold_path(buf, open + 1, trow, base)
+        if full then open_entry(ttarget, full) end
+      end
+      return true
     end
 
+    local entry = (line:gsub("^%s+", "")):gsub("%s+$", "")
+    if entry == "" then return false end
+    local isdir = entry:sub(-1) == "/"
+    local full = join_path(base, isdir and entry:sub(1, -2) or entry)
+
     if isdir then
-      -- rewrite the trigger's path and re-list in place (oil-style navigation),
-      -- preserving the cell's mode (tree stays tree) and -H flag
+      -- rewrite the trigger's path and re-list in place (oil-style navigation)
       local tindent = trig:match("^(%s*)")
-      local suffix = (flags.tree and " -T" or "") .. (flags.hidden and " -H" or "")
+      local suffix = flags.hidden and " -H" or ""
       local newtrig = tindent .. (ttarget ~= "" and (ttarget .. ": ") or ": ") .. full .. suffix
       vim.api.nvim_buf_set_lines(buf, open - 1, open, false, { newtrig })
       run_list(buf, open - 1, tindent, ttarget, full .. suffix)
