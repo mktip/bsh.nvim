@@ -5,6 +5,8 @@
 
 **Buffer SHell**: a shell that lives in a Neovim buffer instead of a terminal.
 
+![bsh.nvim demo](assets/vhs/bsh.gif)
+
 In a neovim buffer, imagine if you type
 
 % pwd # and you \<CR> here
