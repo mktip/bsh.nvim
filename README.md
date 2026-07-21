@@ -7,175 +7,35 @@
 
 ![bsh.nvim demo](assets/vhs/bsh.gif)
 
-In a neovim buffer, imagine if you type
+Point at a `% command`, press `<CR>`, and bsh runs it — writing the result into
+an owned `out` fence right below. The whole session is an ordinary, editable
+buffer: search it, fold it, edit the output in place, and save it as a file.
 
-% pwd # and you \<CR> here
-```out
-/home/mktips/pockt/bsh.nvim
-```
+## Features
 
-and it runs!
-
-Even if it was over an ssh host
-
-mktips@simurgh-base% uname -s
-```out
-Linux
-```
-
-or with an extremely long output
-
-% cat /proc/cpuinfo # \<CTRL>+\<CR> to redirect and open the output in a scratch buffer
-```log
-bsh://out/README.bsh.md/1  ·  447 lines  ·  exit 0  ·  <CR> open
-```
-
-% for i in {a..z}; do echo $i; sleep 1; done
-```out
-a
-b
-c
-d
-e # can't really wait.. that's.. 26 seconds of my life # yes, <CTRL>+c works (kind of)
-[exit 143]
-[cancelled]
-```
-
-If you want a persistent session
-
-%% cd /tmp
-```out
-(no output)
-```
-
-% pwd
-```out
-/home/mktips/pockt/bsh.nvim
-```
-
-%% pwd
-```out
-/tmp
-```
-
----
-
-You can also explore files (yes remote ones too)
-
-: ~/pockt/bsh.nvim
-```dir
-../
-bin/
-deps/
-docs/
-examples/
-lua/            # Navigable with <CR>!
-plugin/
-tests/
-typst/
-LICENSE
-Makefile
-README.bsh.md
-```
-
-mktips@simurgh-base: ~/.config/nvim
-```dir
-../
-lua/
-spell/
-init.lua
-```
-
-: ~/pockt/bsh.nvim/examples/ -T
-```tree
-/home/mktips/pockt/bsh.nvim/examples//
-├── bsh-home/
-│   ├── db/
-│   │   └── data/
-│   │       ├── hosts.ndb
-│   │       └── systems.ndb
-│   ├── demo/
-│   │   ├── conn.sh*            # Also navigable with <CR>
-│   │   ├── greet/
-│   │   ├── hello.sh*
-│   │   └── menu.sh*
-│   ├── docker/
-│   │   ├── conn.sh*
-│   │   ├── create.sh*
-│   │   └── list.sh*
-│   ├── host/
-│   └── llm/
-│       └── tools/
-│           ├── reverse.py*
-│           └── weather.py*
-└── playground.bsh
-
-10 directories, 11 files
-```
-
-> Technically there is also means of creating file in that mode, but it is a
-> pure side effect for the time being. Planning to change it into a proper
-> structured output later on (instead of relying on the `tree` command and
-> adhoc parsing.)
-
----
-
-```python %
-# you can't see it, but above, the codeblock starts with \`\`\`python %
-print("Works")
-```
-```out
-Works
-```
-
-```python mktips@simurgh-base%
-# this time \`\`\`python mktips@simurgh-base%
-print("Across the oceans")
-```
-```out
-Across the oceans
-```
-
-```python %%
-# and here \`\`\`python %%
-import os
-```
-```out
-(no output)
-```
-
-
-```python %%
-# likewise \`\`\`python %% (sharing the same python session/env)
-os.system("cowsay persistantly")
-```
-```out
- ______________
-< persistantly > and it is all within an editable buffer
- --------------
-        \   ^__^
-         \  (oo)\_______
-            (__)\       )\/\
-                ||----w |
-                ||     ||
-```
-
-
->> Hey, AI man, what animal is that? # (">>" to invoke an llm call with the prior cell as input)
-```agent
-That is an ASCII art **cow**!
-```
-
-> `[template]` before the `>`s picks which `llm` template to call (default:
-> `config.agent_template`, "web"); a trailing `!` on the `>`s shows tool calls
-> (`--td`). E.g. `[papers]>>! find papers on X` = "papers" template, 1 prior
-> cell as context, tool calls shown.
-
-
-demo.reverse !sdnammoc motsuc gniniatnoc seunem nwo ruoy enifed neve nac uoy
-```out
-you can even define your own menues containing custom commands!
-```
+- **Shell cells** — `% cmd` runs in place; output lands in an `out` fence below,
+  and re-running rewrites that fence idempotently.
+- **Persistent sessions** — `%% cmd` keeps a shell session across cells (cwd,
+  env, variables); a plain `%` is one-shot.
+- **Remote** — prefix with `user@host` (e.g. `user@host% cmd`,
+  `user@host: ~/dir`) to run over ssh; listings and files work remotely too.
+- **Redirect & cancel** — `<C-CR>` (or `g<CR>`) sends long output to a scratch
+  buffer, leaving a linkable `log` reference; `<C-c>` cancels a running command.
+- **Editable output** — it's just buffer text: edit it, search it, fold it, do
+  all the nvim magic your heart desires.
+- **File explorer** — `: path` lists a directory; add `-T` for a foldable tree;
+  `<CR>` drills into folders and opens files (remote paths included).
+- **Code fences** — open a block with `lang %` (e.g. `python %`) to run it;
+  `lang %%` shares one interpreter session across blocks (python today, more
+  language drivers planned).
+- **LLM cells** — `>>` asks an `llm` with the previous cell(s) as context (`>`
+  none, `>>` one, `>>>` two, …); a `[template]` before the `>`s picks the `llm`
+  template; a trailing `!` shows tool calls.
+- **Namespace commands** — a dotted name like `demo.reverse` maps to a script
+  under `$BSH_HOME`; directories list as navigable menus, and `name!` edits or
+  scaffolds the source.
+- **Shareable & replayable** — sessions are plain `*.bsh` / `*.bsh.md` files;
+  `:BshReplay` re-runs a saved session's cells (typst export planned).
 
 ## Motive
 
