@@ -127,7 +127,9 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
   end
   local paint = sink or inline_paint
   local function split_out()
-    local lines = vim.split(acc:gsub("\r", ""), "\n", { plain = true })
+    -- strip terminal overstrike (`char`+BS+`char`, how non-tty `man`/groff
+    -- on some systems, e.g. FreeBSD's mandoc, encodes bold/underline)
+    local lines = vim.split(acc:gsub("\r", ""):gsub(".\b", ""), "\n", { plain = true })
     while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
     return lines
   end
