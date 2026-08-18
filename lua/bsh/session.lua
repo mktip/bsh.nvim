@@ -104,11 +104,19 @@ end
 -- on its prompt line (`row`, 0-indexed), reading like the shell prompt it mirrors
 -- -- `web@prod:/var/log` remote, just the path locally. We clear the row's prior
 -- badge first so re-running a cell replaces rather than stacks.
+--
+-- Off unless `config.prompt_badge` is set. The clear still runs when it is off, so
+-- flipping the option (or reloading with it off) drops badges an earlier session
+-- already painted instead of stranding them until the buffer is reopened.
 local function set_prompt_badge(buf, row, target, cwd)
-  if not (row and cwd and cwd ~= "" and vim.api.nvim_buf_is_valid(buf)) then return end
+  if not (row and vim.api.nvim_buf_is_valid(buf)) then return end
+  if row >= 0 and row < vim.api.nvim_buf_line_count(buf) then
+    pcall(vim.api.nvim_buf_clear_namespace, buf, promptns, row, row + 1)
+  end
+  if not config.prompt_badge then return end
+  if not (cwd and cwd ~= "") then return end
   if row < 0 or row >= vim.api.nvim_buf_line_count(buf) then return end
   local label = (target ~= "" and (target .. ":") or "") .. cwd
-  pcall(vim.api.nvim_buf_clear_namespace, buf, promptns, row, row + 1)
   pcall(vim.api.nvim_buf_set_extmark, buf, promptns, row, 0, {
     virt_text = { { "  " .. label, "Comment" } },
     virt_text_pos = "eol",

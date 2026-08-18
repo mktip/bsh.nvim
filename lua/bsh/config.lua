@@ -77,6 +77,16 @@ M.menu_exit = 150
 -- code printing e.g. `docker@<id>$$ ` and bsh swaps the breadcrumb for that cell.
 M.cell_exit = 151
 
+-- Whether a finished SESSION (`<marker><marker>`) shell cell trails its prompt
+-- line with the shell's cwd as eol virt_text -- `web@prod:/var/log` for a remote,
+-- the bare path locally. It mirrors a shell prompt, which is the case for it; the
+-- case against is that a session line is read as part of a DOCUMENT, and a path
+-- that materialises next to it only after you run it makes the line jitter and
+-- reads as noise in a file meant to be shared. Off for that reason; set true to
+-- get the badge back. Only `sh` sessions ever showed one -- the python driver's
+-- sentinel carries no pwd.
+M.prompt_badge = false
+
 -- Yes/no gate before `foo.bar!` creates a NEW file (so a stray `word!` line can't
 -- silently scaffold). Overridable for customisation / tests; return true = go.
 function M.confirm(prompt)
