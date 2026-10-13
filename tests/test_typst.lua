@@ -30,7 +30,7 @@ T["a routed % puts the host in the opener and keeps the command inert"] = functi
   -- STAGED opener (host + cmd fields) is what we assert -- it's written up front.
   H.bootstrap(child, { typst = true, lines = { "web@prod% grep -c '$' /etc/passwd" } })
   H.run(child, 1)
-  eq(H.rowof(child, '^#cell%(cmd: "grep %-c .\\$. /etc/passwd", host: "web@prod"') ~= nil, true)
+  eq(H.rowof(child, '^#cell%(cmd: "grep %-c \'%$\' /etc/passwd", host: "web@prod"') ~= nil, true)
 end
 
 T["re-running replaces the #cell body (idempotent)"] = function()
@@ -39,7 +39,7 @@ T["re-running replaces the #cell body (idempotent)"] = function()
   child.lua("vim.api.nvim_buf_set_lines(0, 0, 1, false, { '% echo two' })")
   H.run(child, 1)
   eq(H.rowof(child, "^two$") ~= nil, true)
-  eq(H.rowof(child, "^one$"), vim.NIL) -- old output gone, not duplicated
+  eq(H.rowof(child, "^one$"), nil) -- old output gone, not duplicated
   -- exactly one #cell opener and one closer
   eq(child.lua_get([[(function()
     local o = 0 for _, l in ipairs(vim.api.nvim_buf_get_lines(0,0,-1,false)) do

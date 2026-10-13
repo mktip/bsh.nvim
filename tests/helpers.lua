@@ -60,8 +60,11 @@ function M.lines(child)
 end
 
 -- 1-indexed row of the first line matching the Lua pattern `pat` (or nil).
+-- 1-based row of the first buffer line matching Lua pattern `pat`, or nil. The RPC
+-- boundary hands a missing match back as vim.NIL (which is `~= nil`!), so map it
+-- to a real nil -- otherwise `rowof(..) ~= nil` assertions can never fail.
 function M.rowof(child, pat)
-  return child.lua_get(
+  local r = child.lua_get(
     [[(function(p)
       for i, l in ipairs(vim.api.nvim_buf_get_lines(0,0,-1,false)) do
         if l:match(p) then return i end
@@ -69,6 +72,8 @@ function M.rowof(child, pat)
     end)(...)]],
     { pat }
   )
+  if r == vim.NIL then return nil end
+  return r
 end
 
 return M
