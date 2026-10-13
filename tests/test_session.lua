@@ -121,4 +121,33 @@ T["Ctrl-C (interrupt_session) still interrupts a running cell and keeps the sess
   eq(has("^kept$"), true) -- same shell: env survived the interrupt
 end
 
+-- `%%` streams like `%`: output shows up while the cell is still running, not in
+-- one dump at the end.
+T["%% streams partial output while the cell is still running"] = function()
+  H.bootstrap(child, { name = "st.bsh", lines = { "%% for i in 1 2 3; do echo line$i; sleep 1; done" } })
+  child.lua([[
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'x', false)
+    vim.wait(1500) -- line1 is out; line3 is >= 2s away
+  ]])
+  eq(has("^line1$"), true) -- painted while still running...
+  eq(has("^line3$"), false) -- ...before the cell finished
+  child.lua([[
+    vim.wait(4000, function()
+      return vim.tbl_contains(vim.api.nvim_buf_get_lines(0, 0, -1, false), 'line3')
+    end, 20)
+    vim.wait(300) -- let the sentinel land and the final fill run
+  ]])
+  eq(child.lua_get("vim.api.nvim_buf_get_lines(0, 0, -1, false)"),
+    { "%% for i in 1 2 3; do echo line$i; sleep 1; done", "```out", "line1", "line2", "line3", "```" })
+end
+
+T["%% streaming keeps a finished cell exact when re-run (no stale lines)"] = function()
+  H.bootstrap(child, { name = "st2.bsh", lines = { "%% printf 'a\\nb\\nc\\n'" } })
+  H.run(child, 1)
+  H.run(child, 1)
+  eq(child.lua_get("vim.api.nvim_buf_get_lines(0, 0, -1, false)"),
+    { "%% printf 'a\\nb\\nc\\n'", "```out", "a", "b", "c", "```" })
+end
+
 return T

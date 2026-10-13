@@ -151,9 +151,12 @@ function M.cell_recode(buf, mark, code)
   if new ~= line then vim.api.nvim_buf_set_lines(buf, orow, orow + 1, false, { new }) end
 end
 
--- Replace the placeholder body line (located via its extmark) with `lines`,
--- each indented to match the trigger. The closing fence below it is untouched.
-function M.fill_fence(buf, mark, indent, lines)
+-- Replace the placeholder body (located via its extmark) with `lines`, each
+-- indented to match the trigger. The closing fence below it is untouched. `n` is
+-- how many body lines are there now: 1 (the placeholder) unless output was
+-- streamed in; it may be a function, resolved when the fill actually runs, so a
+-- caller whose streamed paints are still queued sees their final count.
+function M.fill_fence(buf, mark, indent, lines, n)
   vim.schedule(function()
     if not vim.api.nvim_buf_is_valid(buf) then return end
     local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
@@ -163,7 +166,8 @@ function M.fill_fence(buf, mark, indent, lines)
     for _, l in ipairs(#lines > 0 and lines or { "(no output)" }) do
       out[#out + 1] = indent .. l
     end
-    vim.api.nvim_buf_set_lines(buf, row, row + 1, false, out)
+    if type(n) == "function" then n = n() end
+    vim.api.nvim_buf_set_lines(buf, row, row + (n or 1), false, out)
     pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
     if inflight[buf] then
       inflight[buf][mark] = nil

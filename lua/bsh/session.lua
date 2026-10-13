@@ -163,6 +163,45 @@ local function set_prompt_badge(buf, row, target, cwd)
   })
 end
 
+-- Split a session's raw output into display lines: strip CRs and trailing blanks.
+local function body_lines(body)
+  local lines = vim.split(body:gsub("\r", ""), "\n", { plain = true })
+  while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
+  return lines
+end
+
+-- Live-paint the running cell's output as it arrives, like a one-shot `%` does.
+-- The shared pipe means the sentinel can arrive split across chunks, so only
+-- COMPLETE lines are painted, plus a trailing partial line unless it could be the
+-- start of the sentinel (then it is held back until the next chunk settles it).
+-- `item.n` tracks how many body lines the fence occupies (1 = the placeholder), so
+-- each repaint -- and the final fill -- replaces exactly what was painted.
+local function stream_partial(buf, s)
+  local item = s.current
+  if not (item and s.acc ~= "") then return end
+  local marker = "__BSH_" .. s.token .. "__:"
+  local cut = s.acc:match("^.*()\n") -- index of the last newline, or nil
+  local tail = cut and s.acc:sub(cut + 1) or s.acc
+  local held = tail ~= "" and (marker:sub(1, #tail) == tail or tail:sub(1, #marker) == marker)
+  local text = held and (cut and s.acc:sub(1, cut - 1) or "") or s.acc
+  local lines = body_lines(text)
+  if #lines == 0 or item.last == text then return end
+  item.last = text
+  vim.schedule(function()
+    if item.done or not vim.api.nvim_buf_is_valid(buf) then return end -- finished since: final fill owns it
+    if item.sink then
+      item.sink(lines, false)
+      return
+    end
+    local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, item.mark, {})
+    if not pos[1] then return end -- fence gone (re-run / cleared): stale
+    local out = {}
+    for _, l in ipairs(lines) do out[#out + 1] = item.indent .. l end
+    vim.api.nvim_buf_set_lines(buf, pos[1], pos[1] + item.n, false, out)
+    item.n = #out
+  end)
+end
+
 local function sess_pump(buf, key)
   local s = sessions[buf] and sessions[buf][key]
   if not s or s.busy then return end
@@ -199,8 +238,8 @@ local function sess_start(buf, lang, target)
         local item = s.current
         s.busy, s.current = false, nil
         if item then
-          local lines = vim.split(body:gsub("\r", ""), "\n", { plain = true })
-          while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
+          item.done = true -- queued streaming paints for it become no-ops
+          local lines = body_lines(body)
           if tonumber(rc) ~= 0 then lines[#lines + 1] = "[exit " .. rc .. "]" end
           if pwd ~= "" then -- shell told us where it is now -> refresh the cwd badge
             s.cwd = pwd
@@ -211,11 +250,15 @@ local function sess_start(buf, lang, target)
             pcall(vim.api.nvim_buf_del_extmark, buf, ns, item.mark)
             if inflight[buf] then inflight[buf][item.mark] = nil end
           else
-            fill_fence(buf, item.mark, item.indent, lines)
+            -- scheduled so `item.n` is read AFTER any queued streaming paints ran
+            vim.schedule(function()
+              fill_fence(buf, item.mark, item.indent, lines, function() return item.n end)
+            end)
           end
         end
         sess_pump(buf, key) -- drain anything queued behind it
       end
+      stream_partial(buf, s) -- no sentinel yet for the running cell: paint what we have
     end,
     on_exit = function() if sessions[buf] then sessions[buf][key] = nil end end,
   })
@@ -231,8 +274,9 @@ end
 -- `out` fence; with `to_buf` (<C-CR>) -- or sticky, if the cell already owns a
 -- `log` fence -- in a side buffer, exactly like `$`. A `$$` fence is pure output
 -- (nothing to navigate inside it), so the only difference from `$` is that the
--- session fills once on unit completion rather than streaming, so we hand the
--- buffer sink to the queue item and the pump calls it instead of `fill_fence`.
+-- session streams partial output (see stream_partial) and fills on completion, so
+-- we hand the buffer sink to the queue item and the pump calls it instead of
+-- `fill_fence`.
 -- `prow` (0-indexed, optional) is the cell's PROMPT line -- the `$$`/```$$` line
 -- the badge attaches to. Only `sh` sessions surface a cwd badge (it rides the
 -- shell's `$PWD`); a nil `prow` just skips it.
@@ -252,7 +296,7 @@ function M.run_session(buf, lang, target, trow, indent, cmd, to_buf, prow)
     item = { cmd = cmd, mark = mark, indent = indent, sink = sink, prow = prow }
   else
     local mark = stage_fence(buf, trow, indent, "out", "...running (session)...")
-    item = { cmd = cmd, mark = mark, indent = indent, prow = prow }
+    item = { cmd = cmd, mark = mark, indent = indent, prow = prow, n = 1 }
   end
   table.insert(sessions[buf][key].queue, item)
   sess_pump(buf, key)
@@ -324,7 +368,8 @@ function M.reset_session(buf, lang, target)
       pcall(vim.api.nvim_buf_del_extmark, buf, ns, it.mark)
       if inflight[buf] then inflight[buf][it.mark] = nil end
     elseif it.mark then
-      fill_fence(buf, it.mark, it.indent, { "[session reset]" })
+      it.done = true
+      fill_fence(buf, it.mark, it.indent, { "[session reset]" }, function() return it.n end)
     end
   end
   if s.job then pcall(vim.fn.jobstop, s.job) end -- on_exit also nils the slot
