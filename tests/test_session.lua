@@ -31,6 +31,7 @@ end
 
 T["the cwd badge tracks the shell's $PWD (no `cd` parsing)"] = function()
   H.bootstrap(child, { name = "c.bsh", lines = { "%% cd /tmp", "", "%% pwd" } })
+  child.lua("require('bsh.config').prompt_badge = true") -- the badge is opt-in
   H.run(child, H.rowof(child, "cd /tmp"))
   H.run(child, H.rowof(child, "^%%%% pwd$"))
   -- `pwd` confirms the session really moved; the badge mirrors it on the cell line
@@ -43,6 +44,7 @@ T["a session composes over a user-defined transport"] = function()
   -- `loc` is a transport that just runs a shell locally -> exercises build_argv's
   -- route path end-to-end (the same path docker/jail/ssh take) without a network.
   child.lua("require('bsh').transports.loc = { 'sh', '-lc', '{cmd}' }")
+  child.lua("require('bsh.config').prompt_badge = true") -- the badge is opt-in
   H.run(child, H.rowof(child, "Y=ok"))
   H.run(child, H.rowof(child, "echo %$Y"))
   eq(H.rowof(child, "^ok$") ~= nil, true)
@@ -67,6 +69,56 @@ T["python %% composes over a transport: globals persist (`python loc@x%%`)"] = f
   H.run(child, H.rowof(child, "^g = 6$"))
   H.run(child, H.rowof(child, "print%('g%*g"))
   eq(H.rowof(child, "^g%*g = 36$") ~= nil, true)
+end
+
+-- True iff a buffer line matches Lua pattern `pat`. (H.rowof returns vim.NIL, not
+-- nil, for "no match" across the RPC boundary, so `rowof(..) ~= nil` can't fail.)
+local function has(pat)
+  return child.lua_get(
+    [[(function(p)
+      for _, l in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+        if l:match(p) then return true end
+      end
+      return false
+    end)(...)]],
+    { pat }
+  )
+end
+
+-- A cell's stdin is NOT the session's command channel: a command that reads stdin
+-- (`mpirun`, a bare `cat`) used to inherit the pipe, eat the sentinel queued behind
+-- it and hang the session until killed.
+T["a cell that reads stdin gets EOF instead of hanging the session"] = function()
+  H.bootstrap(child, { name = "in.bsh", lines = { "%% cat", "", "%% echo after" } })
+  H.run(child, H.rowof(child, "^%%%% cat$"))
+  eq(has("no output"), true) -- cat saw EOF and returned
+  H.run(child, H.rowof(child, "echo after"))
+  eq(has("^after$"), true) -- the session is still responsive
+end
+
+T["an explicit `<` redirect still feeds a cell's stdin"] = function()
+  H.bootstrap(child, { name = "redir.bsh", lines = { "%% printf 'from-file\\n' > /tmp/bsh_in_$$", "", "%% cat < /tmp/bsh_in_$$", "", "%% printf 'a\\nb\\n' | wc -l" } })
+  H.run(child, H.rowof(child, "> /tmp/bsh_in"))
+  H.run(child, H.rowof(child, "cat < /tmp/bsh_in"))
+  eq(has("^from%-file$"), true)
+  H.run(child, H.rowof(child, "wc %-l"))
+  eq(has("^2$"), true)
+end
+
+T["Ctrl-C (interrupt_session) still interrupts a running cell and keeps the session"] = function()
+  H.bootstrap(child, { name = "int.bsh", lines = { "%% X=kept", "", "%% sleep 20", "", "%% echo $X" } })
+  H.run(child, H.rowof(child, "^%%%% X=kept$"))
+  child.lua([[
+    local row = ...
+    vim.api.nvim_win_set_cursor(0, { row, 0 })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'x', false)
+    vim.wait(300)
+  ]], { H.rowof(child, "sleep 20") }) -- re-located: the first run's fence shifted it
+  eq(child.lua_get("require('bsh.session').interrupt_session(vim.api.nvim_get_current_buf(), 'sh', '')"), true)
+  child.lua("vim.wait(800)")
+  eq(has("%[exit 130%]"), true) -- SIGINT reached the child, not the driver
+  H.run(child, H.rowof(child, "echo %$X"))
+  eq(has("^kept$"), true) -- same shell: env survived the interrupt
 end
 
 return T

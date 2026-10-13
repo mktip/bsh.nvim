@@ -17,12 +17,48 @@ local sessions = {} -- [buf] = { [lang] = { job, spec, token, acc, busy, current
 -- cell's prompt line), so it never tangles with the fence/inflight machinery.
 local promptns = vim.api.nvim_create_namespace("bsh_prompt")
 
--- The persistent login shell a remote/transport `sh` session terminates in. Run
--- through the SAME route engine as one-shots (job.build_argv), so a `$$` session
--- composes over any transport -- `docker@id$$`, `web@prod/docker@api$$` -- exactly
--- like a `$`. `exec ${SHELL:-/bin/sh} -l` replaces the hop's wrapper `sh -lc` with
--- a login shell reading the (kept-open) stdin, which is what makes it persistent.
-local SESSION_SH = "exec ${SHELL:-/bin/sh} -l"
+-- The `sh` session driver (POSIX sh, so it runs under bash/zsh/dash/ash alike).
+-- It separates the two jobs a single stdin pipe used to do: bsh's COMMAND channel
+-- is moved to fd 3, and the commands themselves get /dev/null as stdin. Without
+-- this a cell that reads stdin (`mpirun`, `ssh`, a bare `cat`) inherits the
+-- command pipe, steals the bytes queued behind it (the sentinel included) and
+-- hangs the session. Cells arrive as lines closed by an @TOKEN@ end marker, are
+-- `eval`ed in THIS shell (so cd/export/functions persist), and fd 3 is closed for
+-- the eval so no child -- or backgrounded job -- can read the channel. Explicit
+-- redirects inside a cell (`cmd < file`, pipes, heredocs) work as in any shell.
+local DRIVER_SH = [[
+exec 3<&0 </dev/null 2>&1
+while :; do
+  __c=
+  while :; do
+    IFS= read -r __l <&3 || exit 0
+    [ "$__l" = "__BSH_END_@TOKEN@__" ] && break
+    __c="$__c$__l
+"
+  done
+  eval "$__c" 3<&-
+  __r=$?
+  printf '\n__BSH_@TOKEN@__:%d:%s\n' "$__r" "$PWD"
+done
+]]
+
+-- Shells whose syntax isn't POSIX: the driver can't run under them, so those
+-- users (and remote hosts whose $SHELL is one) get /bin/sh -l instead.
+local NON_POSIX = { fish = true, csh = true, tcsh = true, nu = true, xonsh = true, elvish = true, pwsh = true }
+
+local function local_shell()
+  local sh = vim.o.shell
+  return NON_POSIX[vim.fn.fnamemodify(sh, ":t")] and "/bin/sh" or sh
+end
+
+-- Remote/transport: the SAME driver, run as a login shell on the far side through
+-- the route engine, so a `$$` composes over any transport (`docker@id$$`,
+-- `web@prod/docker@api$$`) exactly like a `$`.
+local function remote_command(token)
+  local driver = DRIVER_SH:gsub("@TOKEN@", token)
+  return 'case "${SHELL##*/}" in fish|csh|tcsh|nu|xonsh|elvish|pwsh) __s=/bin/sh;; *) __s=${SHELL:-/bin/sh};; esac; '
+    .. "exec \"$__s\" -l -c " .. vim.fn.shellescape(driver)
+end
 
 -- Python driver run as `python -u -c <this>`; @TOKEN@ is substituted per session.
 -- Reads LENGTH-PREFIXED code chunks and execs each into a persistent globals dict
@@ -59,22 +95,21 @@ while True:
 -- sentinel; the streaming/parsing in sess_start is shared.
 local SPECS = {
   sh = {
-    -- local: a login shell (env loads once). remote/transport (`user@host$$`,
-    -- `docker@id$$`, `web@prod/docker@api$$`): the SAME login shell, reached
-    -- through the route engine -- so a persistent session works over anything a
-    -- one-shot does. cmds arrive on the kept-open stdin (no pty).
-    argv = function(_, target)
-      if target == "" then return { vim.o.shell, "-l" } end
-      return job.build_argv(target, SESSION_SH)
+    -- local: a login shell running DRIVER_SH. remote/transport: the same driver
+    -- reached through the route engine. Cells are fed on the kept-open stdin
+    -- (no pty) as lines + an end marker; see DRIVER_SH for why stdin is split.
+    argv = function(token, target)
+      local driver = DRIVER_SH:gsub("@TOKEN@", token)
+      if target == "" then return { local_shell(), "-l", "-c", driver } end
+      return job.build_argv(target, remote_command(token))
     end,
-    init = function(s) vim.fn.chansend(s.job, "exec 2>&1\n") end,
-    -- The sentinel carries BOTH the exit code AND `$PWD` -- so we learn the
-    -- session's cwd by reading the shell itself (never by parsing `cd`, which a
-    -- dynamic path or a subshell would defeat). The pwd field is parsed back in
-    -- sess_start and surfaced as the cwd badge.
+    init = function() end,
+    -- The sentinel (printed by the driver) carries BOTH the exit code AND `$PWD`
+    -- -- so we learn the session's cwd by reading the shell itself (never by
+    -- parsing `cd`, which a dynamic path or a subshell would defeat). The pwd
+    -- field is parsed back in sess_start and surfaced as the cwd badge.
     send = function(s, code)
-      vim.fn.chansend(s.job, code ..
-        "\nprintf '\\n__BSH_" .. s.token .. "__:%d:%s\\n' \"$?\" \"$PWD\"\n")
+      vim.fn.chansend(s.job, code .. "\n__BSH_END_" .. s.token .. "__\n")
     end,
   },
   python = {
