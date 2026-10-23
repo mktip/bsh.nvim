@@ -28,9 +28,10 @@ buffer: search it, fold it, edit the output in place, and save it as a file.
 - **Code fences** — open a block with `lang %` (e.g. `python %`) to run it;
   `lang %%` shares one interpreter session across blocks (python today, more
   language drivers planned).
-- **LLM cells** — `>>` asks an `llm` with the previous cell(s) as context (`>`
-  none, `>>` one, `>>>` two, …); a `[template]` before the `>`s picks the `llm`
-  template; a trailing `!` shows tool calls.
+- **LLM cells** — `>>` asks a headless agent ([pi](https://pi.dev), else `llm`)
+  with the previous cell(s) as context (`>` none, `>>` one, `>>>` two, …). Tool
+  calls stream in as `⚙ tool arg` lines; pi is read-only unless the `>`s end in
+  `!`. A `[name]` before the `>`s picks the pi model (llm: template).
 - **Namespace commands** — a dotted name like `demo.reverse` maps to a script
   under `$BSH_HOME`; directories list as navigable menus, and `name!` edits or
   scaffolds the source.
@@ -64,7 +65,7 @@ demand with `:Bsh!`; `:Bsh` opens a fresh scratch one.
 > Optional prerequisites (i think, i didn't review it):
 > [otter.nvim](https://github.com/jmbuhr/otter.nvim) (for lsp in codeblocks),
 > [conform.nvim](https://github.com/stevearc/conform.nvim) (for formatting in codebooks),
-> [llm](https://github.com/simonw/llm) (for LLM integration, but any other harness with a print/headless mode should work)
+> [pi](https://pi.dev) or [llm](https://github.com/simonw/llm) (for LLM cells; see `config.agent`)
 
 ## In the pipeline
 

@@ -207,7 +207,7 @@ local function execute_cell(to_buf)
   -- first = how many preceding cells to fold in as context (`>` none, `>>` one,
   -- `>>>` two, …). Output goes in a comment-delimited region below.
   -- An optional `[template]` before the `>`s picks the llm template (default
-  -- config.agent_template); a trailing `!` on the `>`s shows tool calls (`--td`).
+  -- config.agent_template); a trailing `!` on the `>`s lets pi write/run (llm: `--td`).
   local gtpl, gts, gbang, instruction = line:match("^%s*%[([%w_%-]+)%](>+)(!?)%s+(.+)$")
   if not instruction then
     gts, gbang, instruction = line:match("^%s*(>+)(!?)%s+(.+)$")

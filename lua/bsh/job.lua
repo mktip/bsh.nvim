@@ -112,7 +112,10 @@ end
 -- and while the body extmark is still valid, before it's dropped -- so an owner
 -- can patch its opener with post-run facts (the typst `#cell` uses it to write
 -- the now-known exit code into the opener's `code:` field).
-local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag, on_cell, finalize)
+-- `decode(raw) -> text` (optional): turns the raw stdout accumulated so far into the
+-- text to render, for commands that stream a protocol (the pi agent's JSONL events)
+-- rather than plain text. Applied to the live preview and the final render alike.
+local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag, on_cell, finalize, decode)
   local acc, err_data = "", {}
   local n = 1 -- how many body lines we currently occupy (starts: the placeholder)
   -- replace our [row, row+n) body region with `lines`; returns the new n.
@@ -129,7 +132,8 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
   local function split_out()
     -- strip terminal overstrike (`char`+BS+`char`, how non-tty `man`/groff
     -- on some systems, e.g. FreeBSD's mandoc, encodes bold/underline)
-    local lines = vim.split(acc:gsub("\r", ""):gsub(".\b", ""), "\n", { plain = true })
+    local raw = decode and decode(acc) or acc
+    local lines = vim.split(raw:gsub("\r", ""):gsub(".\b", ""), "\n", { plain = true })
     while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
     return lines
   end
