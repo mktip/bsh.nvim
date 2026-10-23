@@ -106,14 +106,16 @@ T["foo.bar! scaffolds an executable leaf, then it runs"] = function()
   eq(H.lines(child), { "demo.newcmd world", "```out", "hello from demo.newcmd world", "```" })
 end
 
-T["ssh: menu of ~/.ssh/config hosts, drilling one emits a session cell"] = function()
+T["ssh: menu of hosts with their users, drilling one emits a session cell"] = function()
   local cfg = vim.fn.tempname()
-  vim.fn.writefile({ "Host alpha beta", "  HostName a.example", "Host *", "  ForwardAgent no", "Host gamma" }, cfg)
+  vim.fn.writefile({ "Host alpha beta", "  HostName a.example", "  User u1", "Host *", "  ForwardAgent no",
+    "Host gamma", "  User u2" }, cfg)
   H.bootstrap(child, { lines = { "ssh" } })
-  child.lua("vim.env.BSH_SSH_CONFIG = ...", { cfg })
+  child.lua("vim.env.BSH_SSH_CONFIG = ...; vim.env.BSH_SSH_SOURCES = 'config'", { cfg })
   H.run(child, 1)
-  eq(H.lines(child), { "ssh", "```menu", "alpha", "beta", "gamma", "```" })
-  H.run(child, H.rowof(child, "^beta$"))
+  eq(H.lines(child), { "ssh", "```menu",
+    "alpha  u1@a.example  config", "beta   u1@a.example  config", "gamma  u2@gamma      config", "```" })
+  H.run(child, H.rowof(child, "^beta "))
   eq(H.lines(child), { "beta%% " })
 end
 
