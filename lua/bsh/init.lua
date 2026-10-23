@@ -117,6 +117,10 @@ local function menu_fence_at(buf, row)
   return nil
 end
 
+-- Lines a visual-mode <CR> selected above an agent cell, consumed by that cell's
+-- dispatch (see execute_cell) and cleared by it.
+local attach_lines
+
 -- Dispatch on the current line. Returns true if something was handled, false to
 -- let <CR> fall through to its default.
 local function execute_cell(to_buf)
@@ -203,17 +207,18 @@ local function execute_cell(to_buf)
     return true
   end
 
-  -- `> instruction` : agentic llm call. The count of leading `>` beyond the
-  -- first = how many preceding cells to fold in as context (`>` none, `>>` one,
-  -- `>>>` two, …). Output goes in a comment-delimited region below.
-  -- An optional `[template]` before the `>`s picks the llm template (default
-  -- config.agent_template); a trailing `!` on the `>`s lets pi write/run (llm: `--td`).
+  -- `> instruction` : agentic call. `>` is stateless; `>>` (two or more arrows)
+  -- continues the thread above it. A visual selection ending on the cell (see the
+  -- visual <CR> map) is attached as extra context. An optional `[name]` before the
+  -- arrows picks the model/template; a trailing `!` lets the agent write/run.
   local gtpl, gts, gbang, instruction = line:match("^%s*%[([%w_%-]+)%](>+)(!?)%s+(.+)$")
   if not instruction then
     gts, gbang, instruction = line:match("^%s*(>+)(!?)%s+(.+)$")
   end
   if instruction then
-    run_agent(buf, trow, indent, instruction, #gts - 1, gtpl, gbang == "!")
+    local attached = attach_lines
+    attach_lines = nil
+    run_agent(buf, trow, indent, instruction, #gts >= 2, gtpl, gbang == "!", attached)
     return true
   end
 
@@ -521,6 +526,23 @@ function M.attach(buf)
     { buffer = buf, desc = "bsh: run cell (output to side buffer)" })
   vim.keymap.set("n", "g<CR>", function() run_here(true) end,
     { buffer = buf, desc = "bsh: run cell (output to side buffer)" })
+
+  -- Visual <CR>: when the selection ENDS on an agent cell (`>`/`>>`), run it with
+  -- the lines above it in the selection attached as context. Any other selection
+  -- keeps the default <CR> motion.
+  vim.keymap.set("x", "<CR>", function()
+    local a, b = vim.fn.line("v"), vim.fn.line(".")
+    local first, last = math.min(a, b), math.max(a, b)
+    local trig = vim.api.nvim_buf_get_lines(buf, last - 1, last, false)[1] or ""
+    if first < last and trig:match("^%s*%[?[%w_%-]*%]?>+!?%s+%S") then
+      attach_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last - 1, false)
+      vim.cmd("normal! \27")
+      vim.api.nvim_win_set_cursor(0, { last, 0 })
+      if not execute_cell(false) then attach_lines = nil end
+    else
+      vim.cmd("normal! +")
+    end
+  end, { buffer = buf, desc = "bsh: run the agent cell ending the selection, selection attached" })
 
   -- <C-c> cancels the running cell under the cursor (one-shot: stop; session:
   -- SIGINT the running command, keep the session). <C-k> ("kill") resets the

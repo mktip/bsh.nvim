@@ -21,16 +21,18 @@ local function fake_pi()
   return dir
 end
 
-T["decode_pi: text deltas + tool lines, thinking dropped, partial tail skipped"] = function()
+T["decode_pi: thinking + text deltas + tool lines, partial tail skipped"] = function()
   H.bootstrap(child, { lines = {} })
   local out = child.lua_get([[require('bsh.agent').decode_pi(table.concat({
-    '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"x"}}',
+    '{"type":"message_update","assistantMessageEvent":{"type":"thinking_start"}}',
+    '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"a\\nb"}}',
+    '{"type":"message_update","assistantMessageEvent":{"type":"thinking_end"}}',
     '{"type":"tool_execution_start","toolName":"bash","args":{"command":"ls   -l"}}',
     '{"type":"tool_execution_end","toolName":"bash","isError":true}',
     '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"done"}}',
     '{"type":"message_upd',
   }, "\n"))]])
-  eq(out, "⚙ bash ls -l ✗\ndone")
+  eq(out, "∴ a\n∴ b\n⚙ bash ls -l ✗\ndone")
 end
 
 T["decode_pi: non-JSON output passes through raw"] = function()
@@ -43,7 +45,69 @@ T["`>` cell runs pi headless and renders its events (``` neutralised)"] = functi
   H.bootstrap(child, { lines = { "> say hi" } })
   child.lua("vim.env.PATH = ... .. ':' .. vim.env.PATH; require('bsh.config').agent = 'pi'", { dir })
   H.run(child, 1)
-  eq(H.lines(child), { "> say hi", "```agent", "⚙ ls /tmp", "Hello ˋˋˋworld", "```" })
+  eq(H.lines(child), { "> say hi", "```agent", "∴ hmm", "⚙ ls /tmp", "Hello ˋˋˋworld", "```" })
+end
+
+-- A fake `pi` that echoes the prompt it was given (its last argv) back as the reply,
+-- or, when $FAKE_PI_REPLY is set, replies with that text instead.
+local function echo_pi()
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, "p")
+  vim.fn.writefile({
+    "#!/usr/bin/env python3",
+    "import json, os, sys",
+    "t = os.environ.get('FAKE_PI_REPLY') or sys.argv[-1]",
+    "print(json.dumps({'type': 'message_update', 'assistantMessageEvent': {'type': 'text_delta', 'delta': t}}))",
+  }, dir .. "/pi")
+  vim.fn.setfperm(dir .. "/pi", "rwxr-xr-x")
+  return dir
+end
+
+local function boot(lines)
+  local dir = echo_pi()
+  H.bootstrap(child, { lines = lines })
+  child.lua("vim.env.PATH = ... .. ':' .. vim.env.PATH; require('bsh.config').agent = 'pi'", { dir })
+end
+
+T["`>` is stateless: only the instruction is sent"] = function()
+  boot({ "% echo earlier", "> what is up" })
+  H.run(child, 2)
+  eq(H.lines(child)[4], "what is up")
+end
+
+T["`>>` sends the thread: earlier ask, reply and cells in between, up to a `>`"] = function()
+  boot({ "forgotten prose", "> first q", "```agent", "first a", "```", "% echo mid", "```out", "mid", "```", ">> follow up" })
+  H.run(child, 10)
+  local out = table.concat(vim.list_slice(H.lines(child), 12), "\n")
+  for _, want in ipairs({ "[you asked] first q", "[agent replied]", "first a", "%% echo mid", "mid", "follow up" }) do
+    eq(out:find(want:gsub("%%%%", "%%"), 1, true) ~= nil, true, want)
+  end
+  eq(out:find("forgotten prose", 1, true), nil) -- before the thread's `>`
+end
+
+T["a heading ends the thread"] = function()
+  boot({ "> old q", "# New section", "% echo hi", ">> next" })
+  H.run(child, 4)
+  local out = table.concat(vim.list_slice(H.lines(child), 6), "\n")
+  eq(out:find("old q", 1, true), nil)
+  eq(out:find("echo hi", 1, true) ~= nil, true)
+end
+
+T["visual <CR> ending on a `>` cell attaches the selected lines"] = function()
+  boot({ "alpha line", "beta line", "> explain", "tail" })
+  child.type_keys("ggVjj") -- select rows 1..3, ending on the `>` cell
+  child.type_keys("<CR>")
+  vim.loop.sleep(1500)
+  local out = table.concat(H.lines(child), "\n")
+  eq(out:find("--- attached selection", 1, true) ~= nil, true)
+  eq(out:find("alpha line\nbeta line", 1, true) ~= nil, true)
+end
+
+T["proposed `sh %` blocks are lifted out of the agent fence into live cells"] = function()
+  boot({ "> suggest" })
+  child.lua("vim.env.FAKE_PI_REPLY = ...", { "Try this:\n```sh %\nls -la\n```\nthen look." })
+  H.run(child, 1)
+  eq(H.lines(child), { "> suggest", "```agent", "Try this:", "then look.", "```", "", "```sh %", "ls -la", "```" })
 end
 
 return T

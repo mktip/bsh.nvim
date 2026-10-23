@@ -28,10 +28,14 @@ buffer: search it, fold it, edit the output in place, and save it as a file.
 - **Code fences** — open a block with `lang %` (e.g. `python %`) to run it;
   `lang %%` shares one interpreter session across blocks (python today, more
   language drivers planned).
-- **LLM cells** — `>>` asks a headless agent ([pi](https://pi.dev), else `llm`)
-  with the previous cell(s) as context (`>` none, `>>` one, `>>>` two, …). Tool
-  calls stream in as `⚙ tool arg` lines; pi is read-only unless the `>`s end in
-  `!`. A `[name]` before the `>`s picks the pi model (llm: template).
+- **LLM cells** — `> ask` is stateless; `>> ask` continues the thread above it
+  (earlier asks, replies and the cells you ran in between, back to the nearest
+  `>`, heading or `---`). To hand it part of the file, visually select the lines
+  *ending on the `>` cell* and press `<CR>`. Commands the agent proposes (a
+  `sh %` block) land below as live cells; you run them, and the output joins the
+  thread. Runs headless [pi](https://pi.dev) (else `llm`), read-only unless the
+  arrows end in `!`; tool calls stream in as `⚙ tool arg` lines; a `[name]`
+  before the arrows picks the model.
 - **Namespace commands** — a dotted name like `demo.reverse` maps to a script
   under `$BSH_HOME`; directories list as navigable menus, and `name!` edits or
   scaffolds the source.
