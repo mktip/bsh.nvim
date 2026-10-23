@@ -7,17 +7,33 @@ local M = {}
 local fence = require("bsh.fence")
 local job = require("bsh.job")
 local config = require("bsh.config")
-local stage_fence = fence.stage_fence
-local run_job, shell_transform, doc_cwd = job.run_job, job.shell_transform, job.doc_cwd
+local run_job, doc_cwd = job.run_job, job.doc_cwd
 
 -- Swap every literal ``` run for a backtick LOOK-ALIKE (U+02CB MODIFIER LETTER
 -- GRAVE ACCENT, ˋˋˋ) so the model's code blocks still read as code blocks but can
--- never terminate our real `agent` fence. Single/double inline backticks are left
--- alone. Used both as the final transform and the live-preview line_xform.
-local function agent_sanitize(l) return (l:gsub("```", "ˋˋˋ")) end
+-- never terminate one of our real fences.
+local function sanitize(l) return (l:gsub("```", "ˋˋˋ")) end
+
+-- Tag on every cell the agent writes into the document (a tool call it made, or a
+-- command it proposes): it is how a re-run of the `>` finds, and replaces, its
+-- whole previous run without touching cells you wrote yourself.
+local TAG = "# ⚙"
+
+-- The run's final lines. The painted region already holds complete fences; only
+-- stderr / a non-zero exit / empty output need wrapping so they sit in one too.
 local function agent_transform(out_data, err_data, code)
-  local lines = shell_transform(out_data, err_data, code)
-  for i, l in ipairs(lines) do lines[i] = agent_sanitize(l) end
+  local lines = {}
+  for _, l in ipairs(out_data) do lines[#lines + 1] = l end
+  local extra = {}
+  for _, l in ipairs(err_data) do if l ~= "" then extra[#extra + 1] = l end end
+  if #extra > 0 then table.insert(extra, 1, "[stderr]") end
+  if code ~= 0 then extra[#extra + 1] = "[exit " .. code .. "]" end
+  if #lines == 0 and #extra == 0 then extra = { "(no output)" } end
+  if #extra > 0 then
+    lines[#lines + 1] = "```agent"
+    for _, l in ipairs(extra) do lines[#lines + 1] = sanitize(l) end
+    lines[#lines + 1] = "```"
+  end
   return lines
 end
 
@@ -80,11 +96,20 @@ local function thread_context(buf, trow)
   return vim.trim(text)
 end
 
--- pi streams JSONL events (`--mode json`); render them as text: the assistant's
--- text deltas, plus one `⚙ tool arg` line per tool call. Thinking streams as
--- `∴ `-prefixed lines (config.agent_show_thinking). Lines
--- that don't parse (the still-incomplete tail while streaming) are skipped; if
--- nothing parses at all, the raw output is shown (e.g. a startup error).
+-- ───────────────── pi's event stream -> a run of notebook blocks ───────────────
+-- pi streams JSONL events (`--mode json`). A turn is a SEQUENCE: text, tool call,
+-- text, tool call, … Parsed into ordered segments, then rendered flat, the way you'd
+-- write it by hand:
+--     ```agent            <- a text segment (thinking as `∴ ` lines, notes as `⚙ …`)
+--     ...
+--     ```
+--     % ls lua  # ⚙       <- a `bash`/`ls` call: a real, re-runnable cell...
+--     ```out
+--     ...                 <- ...holding the result pi saw
+--     ```
+-- Commands the model PROPOSES (a `sh %` block in its text) are lifted out of the
+-- text into the same kind of tagged cell, with no output until you run them.
+-- Other tools (read, grep, edit, …) stay as `⚙ tool arg` note lines in the text.
 local function tool_summary(args)
   args = args or {}
   local v = args.command or args.path or args.file_path or args.pattern
@@ -93,35 +118,194 @@ local function tool_summary(args)
   return #v > 80 and (v:sub(1, 79) .. "…") or v
 end
 
-function M.decode_pi(raw)
-  local s, parsed, thinking = "", false, false
-  local function nl() if s ~= "" and not s:match("\n$") then s = s .. "\n" end end
+-- The cell a tool call becomes (bash -> its command, ls -> `ls path`), or nil for
+-- tools that stay notes.
+local function tool_command(name, args)
+  args = args or {}
+  if name == "bash" and type(args.command) == "string" then return args.command end
+  if name == "ls" then return "ls " .. vim.fn.shellescape(args.path or ".") end
+end
+
+function M.parse_pi(raw)
+  local segs, parsed, finished, thinking, byid = {}, false, false, false, {}
+  local function text()
+    local last = segs[#segs]
+    if last and last.k == "text" then return last end
+    last = { k = "text", s = "" }
+    segs[#segs + 1] = last
+    return last
+  end
+  local function nl(t) if t.s ~= "" and not t.s:match("\n$") then t.s = t.s .. "\n" end end
   for line in raw:gmatch("[^\n]+") do
     local ok, e = pcall(vim.json.decode, line)
     if ok and type(e) == "table" and e.type then
       parsed = true
       local ae = e.assistantMessageEvent
       if e.type == "message_update" and type(ae) == "table" then
-        if ae.type == "text_start" then thinking = false; nl() end
+        local t = text()
+        if ae.type == "text_start" then thinking = false; nl(t) end
         if config.agent_show_thinking then
           if ae.type == "thinking_delta" then
-            if not thinking then nl(); s = s .. "∴ "; thinking = true end
-            s = s .. (ae.delta or ""):gsub("\n", "\n∴ ")
+            if not thinking then nl(t); t.s = t.s .. "∴ "; thinking = true end
+            t.s = t.s .. (ae.delta or ""):gsub("\n", "\n∴ ")
           elseif ae.type == "thinking_end" then
-            thinking = false; nl()
+            thinking = false; nl(t)
           end
         end
-        if ae.type == "text_delta" then s = s .. (ae.delta or "") end
+        if ae.type == "text_delta" then t.s = t.s .. (ae.delta or "") end
       elseif e.type == "tool_execution_start" then
-        nl(); s = s .. "⚙ " .. (e.toolName or "?") .. " " .. tool_summary(e.args) .. "\n"
-      elseif e.type == "tool_execution_end" and e.isError then
-        s = s:gsub("\n$", "") .. " ✗\n"
+        local cmd = tool_command(e.toolName, e.args)
+        if cmd then
+          local seg = { k = "tool", cmd = cmd }
+          segs[#segs + 1] = seg
+          byid[e.toolCallId or ""] = seg
+        else
+          local t = text()
+          nl(t); t.s = t.s .. "⚙ " .. (e.toolName or "?") .. " " .. tool_summary(e.args) .. "\n"
+          byid[e.toolCallId or ""] = t
+        end
+      elseif e.type == "tool_execution_end" then
+        local seg = byid[e.toolCallId or ""]
+        if seg and seg.k == "tool" then
+          local out = {}
+          for _, c in ipairs(type(e.result) == "table" and e.result.content or {}) do
+            if c.text then out[#out + 1] = c.text end
+          end
+          seg.result = table.concat(out, "\n")
+        elseif seg and e.isError then
+          seg.s = seg.s:gsub("\n$", "") .. " ✗\n"
+        end
       elseif e.type == "turn_end" and type(e.message) == "table" and e.message.stopReason == "error" then
-        nl(); s = s .. "[error] " .. (e.message.errorMessage or "agent error") .. "\n"
+        local t = text()
+        nl(t); t.s = t.s .. "[error] " .. (e.message.errorMessage or "agent error") .. "\n"
+      elseif e.type == "agent_end" or e.type == "agent_settled" then
+        finished = true
       end
     end
   end
-  return parsed and s or raw
+  return segs, parsed, finished
+end
+
+-- A cell the agent wrote: `% cmd  # ⚙` for a one-line shell command, else a fenced
+-- input cell whose first body line is the tag.
+local function cell_lines(lang, code)
+  local m = config.marker
+  if (lang == "" or lang == "sh" or lang == "bash") and not code:find("\n", 1, true) then
+    return { m .. " " .. code .. "  " .. TAG }
+  end
+  local out = { "```" .. (lang ~= "" and lang or "sh") .. " " .. m, TAG }
+  vim.list_extend(out, vim.split(code, "\n", { plain = true }))
+  out[#out + 1] = "```"
+  return out
+end
+
+-- Split a text segment into prose lines and proposed cells (`sh %` / `python %`
+-- blocks, which arrive sanitised as ˋˋˋ). An unterminated block stays prose.
+local function split_proposals(text)
+  local prose, cells, cur = {}, {}, nil
+  local m = vim.pesc(config.marker)
+  for _, l in ipairs(vim.split(sanitize(text), "\n", { plain = true })) do
+    local lang = l:match("^ˋˋˋ([%w_+%-]*)%s+" .. m .. "%s*$")
+    if not cur and lang then
+      cur = { lang = lang, body = {}, raw = { l } }
+    elseif cur and l:match("^ˋˋˋ%s*$") then
+      cells[#cells + 1] = cell_lines(cur.lang, table.concat(cur.body, "\n")); cur = nil
+    elseif cur then
+      cur.body[#cur.body + 1] = l; cur.raw[#cur.raw + 1] = l
+    else
+      prose[#prose + 1] = l
+    end
+  end
+  if cur then vim.list_extend(prose, cur.raw) end
+  while #prose > 0 and prose[#prose]:match("^%s*$") do table.remove(prose) end
+  return prose, cells
+end
+
+function M.render_run(segs, finished)
+  local out = {}
+  for _, seg in ipairs(segs) do
+    if seg.k == "text" then
+      local prose, cells = split_proposals(seg.s)
+      if #prose > 0 then
+        out[#out + 1] = "```agent"
+        vim.list_extend(out, prose)
+        out[#out + 1] = "```"
+      end
+      for _, c in ipairs(cells) do -- blank lines keep an unrun cell from adopting the next fence
+        out[#out + 1] = ""
+        vim.list_extend(out, c)
+        out[#out + 1] = ""
+      end
+    else
+      vim.list_extend(out, cell_lines("", seg.cmd))
+      out[#out + 1] = "```out"
+      if seg.result then
+        local res = vim.split(sanitize(seg.result), "\n", { plain = true })
+        while #res > 0 and res[#res] == "" do table.remove(res) end
+        vim.list_extend(out, #res > 0 and res or { "(no output)" })
+      else
+        out[#out + 1] = finished and "(no output)" or "...running..."
+      end
+      out[#out + 1] = "```"
+    end
+  end
+  while #out > 0 and out[#out]:match("^%s*$") do table.remove(out) end
+  return table.concat(out, "\n")
+end
+
+-- decode for run_job: raw stdout so far -> the full region text. Non-JSON output
+-- (a startup error) is shown raw inside an agent fence.
+function M.decode_pi(raw)
+  local segs, parsed, finished = M.parse_pi(raw)
+  if not parsed then return M.render_run({ { k = "text", s = raw } }, true) end
+  return M.render_run(segs, finished)
+end
+
+-- llm: plain text, one segment.
+local function decode_plain(raw) return M.render_run({ { k = "text", s = raw } }, true) end
+
+-- The blocks a previous run of the `>` cell at `trow` left below it, as the row
+-- range [start, stop): agent fences and tagged cells (each with the owned `out`
+-- fence that follows it), tolerating blank lines between. Falls back to any single
+-- owned fence there (so a cell that changed kind replaces its old result).
+local function run_range(buf, trow, indent)
+  local total = vim.api.nvim_buf_line_count(buf)
+  local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
+  local function closer(from)
+    for r = from, total - 1 do
+      if gl(r):match("^%s*```%s*$") then return r end
+    end
+  end
+  local function skip_out(r) -- an owned `out` fence starting at r -> row after it
+    if gl(r):match("^%s*```out%s*$") then
+      local c = closer(r + 1)
+      if c then return c + 1 end
+    end
+    return r
+  end
+  local m = vim.pesc(config.marker)
+  local r, last = trow + 1, trow + 1
+  while r < total do
+    local l = gl(r)
+    if l:match("^%s*$") then
+      r = r + 1
+    elseif l:match("^%s*```agent%s*$") then
+      local c = closer(r + 1)
+      if not c then break end
+      r = c + 1; last = r
+    elseif l:match("^%s*" .. m .. "%s.*" .. vim.pesc(TAG) .. "%s*$") then
+      r = skip_out(r + 1); last = r
+    elseif l:match("^%s*```[%w_+%-]*%s+" .. m .. "%s*$")
+        and gl(r + 1):match("^%s*" .. vim.pesc(TAG) .. "%s*$") then
+      local c = closer(r + 1)
+      if not c then break end
+      r = skip_out(c + 1); last = r
+    else
+      break
+    end
+  end
+  if last == trow + 1 then return fence.fence_range(buf, trow, indent, "agent") end
+  return trow + 1, last
 end
 
 -- Facts the model can't know and shouldn't have to ask for.
@@ -151,53 +335,6 @@ local function session_id(buf)
   return id
 end
 
--- Proposed cells: the agent is told to offer commands as fenced blocks tagged
--- `sh %` / `python %`. Inside the `agent` fence they'd be inert (``` is
--- neutralised), so on finish they are lifted OUT of it and re-inserted just below
--- as real cells -- the user reads one, presses <CR>, and its output joins the
--- document for the agent's next turn. Nothing runs without that keypress.
-local function lift_cells(buf, mark, indent)
-  local pos = vim.api.nvim_buf_get_extmark_by_id(buf, fence.ns, mark, {})
-  if not pos[1] then return end
-  local top, total = pos[1], vim.api.nvim_buf_line_count(buf)
-  local close
-  for r = top, total - 1 do
-    if (vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or ""):match("^%s*```%s*$") then
-      close = r; break
-    end
-  end
-  if not close then return end
-  local body = vim.api.nvim_buf_get_lines(buf, top, close, false)
-  local keep, cells, cur = {}, {}, nil
-  for _, l in ipairs(body) do
-    local t = l:sub(#indent + 1)
-    local lang = t:match("^ˋˋˋ([%w_+%-]*)%s+" .. vim.pesc(config.marker) .. "%s*$")
-    if not cur and lang then
-      cur = { indent .. "```" .. (lang ~= "" and lang or "sh") .. " " .. config.marker }
-    elseif cur and t:match("^ˋˋˋ%s*$") then
-      cur[#cur + 1] = indent .. "```"
-      cells[#cells + 1] = cur; cur = nil
-    elseif cur then
-      cur[#cur + 1] = l
-    else
-      keep[#keep + 1] = l
-    end
-  end
-  if cur then -- unterminated block: leave it as plain text
-    for _, l in ipairs(cur) do keep[#keep + 1] = l end
-  end
-  if #cells == 0 then return end
-  while #keep > 0 and keep[#keep]:match("^%s*$") do table.remove(keep) end
-  if #keep == 0 then keep = { indent .. "(see the cells below)" } end
-  local below = {}
-  for _, c in ipairs(cells) do
-    below[#below + 1] = ""
-    vim.list_extend(below, c)
-  end
-  vim.api.nvim_buf_set_lines(buf, close + 1, close + 1, false, below)
-  vim.api.nvim_buf_set_lines(buf, top, close, false, keep)
-end
-
 -- `> instruction` : agentic call. `>` is STATELESS (the instruction, plus any
 -- `attached` lines from a visual selection); `>>` is STATEFUL (it continues the
 -- thread above it: earlier asks, replies, and the cells run in between). An optional
@@ -222,6 +359,7 @@ function M.run_agent(buf, trow, indent, instruction, stateful, name, bang, attac
     argv = { "pi", "-p", "--mode", "json", "--tools",
       bang and config.agent_tools_write or config.agent_tools,
       "--append-system-prompt", config.agent_prompt,
+      "--append-system-prompt", bang and config.agent_prompt_run or config.agent_prompt_propose,
       "--append-system-prompt", environment(buf) }
     if name then vim.list_extend(argv, { "--model", name }) end
     if config.agent_continue then
@@ -241,10 +379,32 @@ function M.run_agent(buf, trow, indent, instruction, stateful, name, bang, attac
     return
   end
   local note = attached and #attached > 0 and (" (" .. #attached .. " lines attached)") or ""
-  local mark = stage_fence(buf, trow, indent, "agent", "...thinking" .. note .. "...")
+  local start, stop = run_range(buf, trow, indent)
+  local mark = fence.stage_block(buf, start, stop, indent .. "```agent",
+    indent .. "...thinking" .. note .. "...", indent .. "```")
+  -- The run is several blocks, so the sink repaints the WHOLE region (fences and
+  -- all) each time, then re-anchors the mark just inside its top, where stage_block
+  -- put it, so cancel and the next repaint can still find it.
+  local n = 3
+  local function sink(lines, final)
+    if not vim.api.nvim_buf_is_valid(buf) then return end
+    local pos = vim.api.nvim_buf_get_extmark_by_id(buf, fence.ns, mark, {})
+    if not pos[1] then return end -- re-run / cleared -> stale
+    local top = pos[1] - 1
+    if final and lines[#lines] == "[cancelled]" then
+      lines[#lines] = "```agent"; lines[#lines + 1] = "[cancelled]"; lines[#lines + 1] = "```"
+    end
+    local out = {}
+    for _, l in ipairs(lines) do
+      if final and l == "...running..." then l = "(no result)" end -- killed / cancelled mid-call
+      out[#out + 1] = l == "" and "" or (indent .. l)
+    end
+    vim.api.nvim_buf_set_lines(buf, top, top + n, false, out)
+    n = #out
+    vim.api.nvim_buf_set_extmark(buf, fence.ns, top + 1, 0, { id = mark, right_gravity = false })
+  end
   run_job(buf, indent, mark, argv, doc_cwd(buf), agent_transform,
-    agent_sanitize, nil, nil, nil,
-    function() lift_cells(buf, mark, indent) end, decode)
+    nil, sink, nil, nil, nil, decode or decode_plain)
 end
 
 return M

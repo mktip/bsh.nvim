@@ -27,17 +27,22 @@ T["decode_pi: thinking + text deltas + tool lines, partial tail skipped"] = func
     '{"type":"message_update","assistantMessageEvent":{"type":"thinking_start"}}',
     '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"a\\nb"}}',
     '{"type":"message_update","assistantMessageEvent":{"type":"thinking_end"}}',
-    '{"type":"tool_execution_start","toolName":"bash","args":{"command":"ls   -l"}}',
-    '{"type":"tool_execution_end","toolName":"bash","isError":true}',
+    '{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"ls   -l"}}',
+    '{"type":"tool_execution_end","toolCallId":"t1","toolName":"bash","result":{"content":[{"type":"text","text":"total 0"}]}}',
+    '{"type":"tool_execution_start","toolCallId":"t2","toolName":"read","args":{"path":"x.lua"}}',
+    '{"type":"tool_execution_end","toolCallId":"t2","toolName":"read","isError":true}',
     '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"done"}}',
     '{"type":"message_upd',
   }, "\n"))]])
-  eq(out, "∴ a\n∴ b\n⚙ bash ls -l ✗\ndone")
+  -- text / tool call / text, flat: tool calls that can be re-run are cells (with the
+  -- result pi saw); other tools stay `⚙` notes inside the text
+  eq(out, table.concat({ "```agent", "∴ a", "∴ b", "```", "% ls   -l  # ⚙", "```out", "total 0", "```",
+    "```agent", "⚙ read x.lua ✗", "done", "```" }, "\n"))
 end
 
 T["decode_pi: non-JSON output passes through raw"] = function()
   H.bootstrap(child, { lines = {} })
-  eq(child.lua_get([[require('bsh.agent').decode_pi("boom: no auth\n")]]), "boom: no auth\n")
+  eq(child.lua_get([[require('bsh.agent').decode_pi("boom: no auth\n")]]), "```agent\nboom: no auth\n```")
 end
 
 T["`>` cell runs pi headless and renders its events (``` neutralised)"] = function()
@@ -45,7 +50,8 @@ T["`>` cell runs pi headless and renders its events (``` neutralised)"] = functi
   H.bootstrap(child, { lines = { "> say hi" } })
   child.lua("vim.env.PATH = ... .. ':' .. vim.env.PATH; require('bsh.config').agent = 'pi'", { dir })
   H.run(child, 1)
-  eq(H.lines(child), { "> say hi", "```agent", "∴ hmm", "⚙ ls /tmp", "Hello ˋˋˋworld", "```" })
+  eq(H.lines(child), { "> say hi", "```agent", "∴ hmm", "```", "% ls '/tmp'  # ⚙", "```out", "(no result)", "```",
+    "```agent", "Hello ˋˋˋworld", "```" })
 end
 
 -- A fake `pi` that echoes the prompt it was given (its last argv) back as the reply,
@@ -107,7 +113,24 @@ T["proposed `sh %` blocks are lifted out of the agent fence into live cells"] = 
   boot({ "> suggest" })
   child.lua("vim.env.FAKE_PI_REPLY = ...", { "Try this:\n```sh %\nls -la\n```\nthen look." })
   H.run(child, 1)
-  eq(H.lines(child), { "> suggest", "```agent", "Try this:", "then look.", "```", "", "```sh %", "ls -la", "```" })
+  eq(H.lines(child), { "> suggest", "```agent", "Try this:", "then look.", "```", "", "% ls -la  # ⚙" })
+end
+
+T["a multi-line proposal becomes a tagged fence cell"] = function()
+  boot({ "> suggest" })
+  child.lua("vim.env.FAKE_PI_REPLY = ...", { "Run:\n```sh %\nfor f in a b; do\n  echo $f\ndone\n```" })
+  H.run(child, 1)
+  eq(H.lines(child), { "> suggest", "```agent", "Run:", "```", "", "```sh %", "# ⚙", "for f in a b; do",
+    "  echo $f", "done", "```" })
+end
+
+T["re-running `>` replaces the whole previous run, but not your own cells"] = function()
+  boot({ "> suggest" })
+  child.lua("vim.env.FAKE_PI_REPLY = ...", { "A\n```sh %\nls\n```\nB" })
+  H.run(child, 1)
+  child.lua("vim.api.nvim_buf_set_lines(0, -1, -1, false, { '', '% echo mine' })")
+  H.run(child, 1)
+  eq(H.lines(child), { "> suggest", "```agent", "A", "B", "```", "", "% ls  # ⚙", "", "% echo mine" })
 end
 
 return T
