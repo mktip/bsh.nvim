@@ -124,6 +124,12 @@ function M.decode_pi(raw)
   return parsed and s or raw
 end
 
+-- Facts the model can't know and shouldn't have to ask for.
+local function environment(buf)
+  return ("Environment: it is %s; working directory %s; host %s."):format(
+    os.date("%Y-%m-%d %H:%M %Z (%A)"), doc_cwd(buf), vim.uv.os_gethostname())
+end
+
 local function backend()
   local b = config.agent
   if b == "auto" then b = vim.fn.executable("pi") == 1 and "pi" or "llm" end
@@ -215,7 +221,8 @@ function M.run_agent(buf, trow, indent, instruction, stateful, name, bang, attac
   if backend() == "pi" then
     argv = { "pi", "-p", "--mode", "json", "--tools",
       bang and config.agent_tools_write or config.agent_tools,
-      "--append-system-prompt", config.agent_prompt }
+      "--append-system-prompt", config.agent_prompt,
+      "--append-system-prompt", environment(buf) }
     if name then vim.list_extend(argv, { "--model", name }) end
     if config.agent_continue then
       vim.list_extend(argv, { "--session-id", session_id(buf) })
