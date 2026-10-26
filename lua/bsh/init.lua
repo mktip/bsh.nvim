@@ -569,6 +569,11 @@ function M.attach(buf)
   vim.api.nvim_buf_create_user_command(buf, "BshThinking", toggle_thinking,
     { desc = "hide/show the agent's thinking lines" })
 
+  vim.api.nvim_buf_create_user_command(buf, "BshForget", function()
+    require("bsh.agent").forget(buf)
+    vim.notify("bsh: the next `>>` starts a fresh conversation")
+  end, { desc = "forget this file's `>>` conversation" })
+
   -- <localleader>r / :BshReplay — replay this session from the top through the
   -- cell under the cursor, into a fresh interpreter (resets first, then re-runs
   -- every matching session cell in document order).

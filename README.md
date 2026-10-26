@@ -28,9 +28,9 @@ buffer: search it, fold it, edit the output in place, and save it as a file.
 - **Code fences** — open a block with `lang %` (e.g. `python %`) to run it;
   `lang %%` shares one interpreter session across blocks (python today, more
   language drivers planned).
-- **LLM cells** — `> ask` is stateless; `>> ask` continues the thread above it
-  (earlier asks, replies and the cells you ran in between, back to the nearest
-  `>`, heading or `---`). To hand it part of the file, visually select the lines
+- **LLM cells** — `> ask` is stateless; `>> ask` joins the file's ongoing conversation
+  (pi remembers it even if you delete the cells; `:BshForget` starts over, or set
+  `agent_thread = "document"` to have `>>` re-read the cells above it instead). To hand it part of the file, visually select the lines
   *ending on the `>` cell* and press `<CR>`. Commands the agent proposes (a
   `sh %` block) land below as live cells; you run them, and the output joins the
   thread. Runs headless [pi](https://pi.dev) (else `llm`), read-only unless the

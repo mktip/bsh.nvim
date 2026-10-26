@@ -62,17 +62,19 @@ local function echo_pi()
   vim.fn.writefile({
     "#!/usr/bin/env python3",
     "import json, os, sys",
-    "t = os.environ.get('FAKE_PI_REPLY') or sys.argv[-1]",
+    "t = os.environ.get('FAKE_PI_REPLY') or (' '.join(sys.argv) if os.environ.get('FAKE_PI_ARGS') else sys.argv[-1])",
     "print(json.dumps({'type': 'message_update', 'assistantMessageEvent': {'type': 'text_delta', 'delta': t}}))",
   }, dir .. "/pi")
   vim.fn.setfperm(dir .. "/pi", "rwxr-xr-x")
   return dir
 end
 
-local function boot(lines)
+local function boot(lines, thread)
   local dir = echo_pi()
   H.bootstrap(child, { lines = lines })
-  child.lua("vim.env.PATH = ... .. ':' .. vim.env.PATH; require('bsh.config').agent = 'pi'", { dir })
+  child.lua("local dir, thread = ...; vim.env.PATH = dir .. ':' .. vim.env.PATH; "
+    .. "require('bsh.config').agent = 'pi'; require('bsh.config').agent_thread = thread",
+    { dir, thread or "document" })
 end
 
 T["`>` is stateless: only the instruction is sent"] = function()
@@ -142,6 +144,27 @@ T["thinking lines fold on their own (foldlevel 1 hides them, fences stay open)"]
   eq(child.lua_get("vim.fn.foldclosed(2)"), -1) -- and so does the fence
   child.cmd("BshThinking") -- toggle back to everything open
   eq(child.lua_get("vim.fn.foldclosed(3)"), -1)
+end
+
+T["`>>` joins a per-file pi session (same id each time, survives deleting cells); `>` is stateless"] = function()
+  boot({ "> one", ">> two", ">> three" }, "session")
+  child.lua("vim.env.FAKE_PI_ARGS = '1'")
+  child.lua("vim.api.nvim_buf_set_name(0, '/tmp/bsh-test-thread.bsh')")
+  local function ran(row)
+    H.run(child, row)
+    local l = H.lines(child)
+    return table.concat(l, "\n")
+  end
+  local out = ran(3) -- the last cell first, so the rows above keep their numbers
+  local id = out:match("%-%-session%-id (%S+)")
+  eq(id ~= nil, true)
+  out = ran(2)
+  eq(out:find("--session-id " .. id, 1, true) ~= nil, true) -- same conversation
+  eq(out:find("thread so far", 1, true), nil) -- and no re-read of the document
+  out = ran(1)
+  eq(out:find("--no-session", 1, true) ~= nil, true)
+  child.lua("require('bsh.agent').forget(0)")
+  eq(child.lua_get("vim.b.bsh_agent_salt ~= nil"), true)
 end
 
 return T

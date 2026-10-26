@@ -70,8 +70,11 @@ M.agent_thinking_prefix = "| "
 -- start with the thinking folded away (`<localleader>t` / :BshThinking toggles it).
 M.agent_hide_thinking = false
 M.agent_thinking = nil
--- pi: keep one conversation per buffer (follow-up `>` cells remember earlier ones).
-M.agent_continue = false
+-- What a `>>` cell remembers: "session" (pi keeps one conversation per file, so a
+-- deleted cell is still remembered; `:BshForget` starts over) or "document" (it
+-- re-reads the cells above it, back to the nearest `>`, heading or `---`; forgets
+-- whatever you delete). llm always uses "document".
+M.agent_thread = "session"
 
 -- interpreter used for `python` cells (one-shot `python $` and session `python $$`).
 M.python = "python3"

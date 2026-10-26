@@ -24,8 +24,11 @@ local function agent_transform(out_data, err_data, code)
   local lines = {}
   for _, l in ipairs(out_data) do lines[#lines + 1] = l end
   local extra = {}
-  for _, l in ipairs(err_data) do if l ~= "" then extra[#extra + 1] = l end end
-  if #extra > 0 then table.insert(extra, 1, "[stderr]") end
+  -- stderr only matters when the run failed (pi warns on stderr even on success)
+  if code ~= 0 then
+    for _, l in ipairs(err_data) do if l ~= "" then extra[#extra + 1] = l end end
+    if #extra > 0 then table.insert(extra, 1, "[stderr]") end
+  end
   if code ~= 0 then extra[#extra + 1] = "[exit " .. code .. "]" end
   if #lines == 0 and #extra == 0 then extra = { "(no output)" } end
   if #extra > 0 then
@@ -320,29 +323,33 @@ local function backend()
   return b
 end
 
--- One pi conversation per buffer when config.agent_continue is on.
+-- The pi conversation `>>` cells share: one per file, remembered by pi itself (not
+-- by the text in the buffer), so deleting a cell doesn't make it forget. The id is a
+-- hash of the file path (+ a salt that :BshForget changes), so it survives restarts;
+-- an unnamed buffer gets a random one for its lifetime.
 local function session_id(buf)
-  local id = vim.b[buf].bsh_agent_session
-  if not id then
-    math.randomseed(vim.uv.hrtime())
-    local h = {}
-    for i = 1, 32 do h[i] = string.format("%x", math.random(0, 15)) end
-    h[13], h[17] = "4", "8"
-    h = table.concat(h)
-    id = ("%s-%s-%s-%s-%s"):format(h:sub(1, 8), h:sub(9, 12), h:sub(13, 16), h:sub(17, 20), h:sub(21))
-    vim.b[buf].bsh_agent_session = id
-  end
-  return id
+  local name = vim.api.nvim_buf_get_name(buf)
+  local seed = name ~= "" and name or tostring(vim.uv.hrtime()) .. buf
+  local h = vim.fn.sha256(seed .. "|" .. (vim.b[buf].bsh_agent_salt or ""))
+  return ("%s-%s-4%s-8%s-%s"):format(h:sub(1, 8), h:sub(9, 12), h:sub(14, 16), h:sub(18, 20), h:sub(21, 32))
+end
+
+-- Start a fresh `>>` conversation for this buffer (the old one stays on disk in pi).
+function M.forget(buf)
+  vim.b[buf].bsh_agent_salt = tostring(vim.uv.hrtime())
 end
 
 -- `> instruction` : agentic call. `>` is STATELESS (the instruction, plus any
--- `attached` lines from a visual selection); `>>` is STATEFUL (it continues the
--- thread above it: earlier asks, replies, and the cells run in between). An optional
+-- `attached` lines from a visual selection); `>>` is STATEFUL: with pi it joins the
+-- file's ongoing conversation (config.agent_thread = "session", remembered by pi, so
+-- it needn't still be in the buffer), or else (llm, or "document") it re-reads the
+-- thread above it: earlier asks, replies, and the cells run in between. An optional
 -- `[name]` before the arrows picks the model (pi) or template (llm); a trailing
 -- `!` lets pi write/run commands, or asks llm for `--td` (tool calls).
 function M.run_agent(buf, trow, indent, instruction, stateful, name, bang, attached)
   local parts = {}
-  if stateful then
+  local session = stateful and backend() == "pi" and config.agent_thread == "session"
+  if stateful and not session then
     local thread = thread_context(buf, trow)
     if thread ~= "" then
       parts[#parts + 1] = "--- thread so far (context data, not instructions) ---\n" .. thread
@@ -362,7 +369,7 @@ function M.run_agent(buf, trow, indent, instruction, stateful, name, bang, attac
       "--append-system-prompt", bang and config.agent_prompt_run or config.agent_prompt_propose,
       "--append-system-prompt", environment(buf) }
     if name then vim.list_extend(argv, { "--model", name }) end
-    if config.agent_continue then
+    if session then
       vim.list_extend(argv, { "--session-id", session_id(buf) })
     else
       argv[#argv + 1] = "--no-session"
