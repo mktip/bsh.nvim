@@ -9,15 +9,14 @@ local job = require("bsh.job")
 local config = require("bsh.config")
 local run_job, doc_cwd = job.run_job, job.doc_cwd
 
--- Swap every literal ``` run for a backtick LOOK-ALIKE (U+02CB MODIFIER LETTER
--- GRAVE ACCENT, ˋˋˋ) so the model's code blocks still read as code blocks but can
--- never terminate one of our real fences.
-local function sanitize(l) return (l:gsub("```", "ˋˋˋ")) end
+-- Swap every literal ``` run for ''' (plain ASCII) so the model's code blocks still
+-- read as code blocks but can never terminate one of our real fences.
+local function sanitize(l) return (l:gsub("```", "'''")) end
 
 -- Tag on every cell the agent writes into the document (a tool call it made, or a
 -- command it proposes): it is how a re-run of the `>` finds, and replaces, its
 -- whole previous run without touching cells you wrote yourself.
-local TAG = "# ⚙"
+local TAG = "# agent"
 
 -- The run's final lines. The painted region already holds complete fences; only
 -- stderr / a non-zero exit / empty output need wrapping so they sit in one too.
@@ -92,7 +91,7 @@ local function thread_context(buf, trow)
   end
   local text = transcript(vim.list_slice(lines, start, #lines))
   local max = config.agent_max_context
-  if #text > max then text = "[… earlier context trimmed]\n" .. text:sub(-max) end
+  if #text > max then text = "[... earlier context trimmed]\n" .. text:sub(-max) end
   return vim.trim(text)
 end
 
@@ -100,22 +99,22 @@ end
 -- pi streams JSONL events (`--mode json`). A turn is a SEQUENCE: text, tool call,
 -- text, tool call, … Parsed into ordered segments, then rendered flat, the way you'd
 -- write it by hand:
---     ```agent            <- a text segment (thinking as `∴ ` lines, notes as `⚙ …`)
+--     ```agent            <- a text segment (thinking as prefixed lines, notes as `[tool] …`)
 --     ...
 --     ```
---     % ls lua  # ⚙       <- a `bash`/`ls` call: a real, re-runnable cell...
+--     % ls lua  # agent       <- a `bash`/`ls` call: a real, re-runnable cell...
 --     ```out
 --     ...                 <- ...holding the result pi saw
 --     ```
 -- Commands the model PROPOSES (a `sh %` block in its text) are lifted out of the
 -- text into the same kind of tagged cell, with no output until you run them.
--- Other tools (read, grep, edit, …) stay as `⚙ tool arg` note lines in the text.
+-- Other tools (read, grep, edit, …) stay as `[tool] arg` note lines in the text.
 local function tool_summary(args)
   args = args or {}
   local v = args.command or args.path or args.file_path or args.pattern
   if type(v) ~= "string" then v = vim.json.encode(args) end
   v = v:gsub("%s+", " ")
-  return #v > 80 and (v:sub(1, 79) .. "…") or v
+  return #v > 80 and (v:sub(1, 79) .. "...") or v
 end
 
 -- The cell a tool call becomes (bash -> its command, ls -> `ls path`), or nil for
@@ -146,8 +145,9 @@ function M.parse_pi(raw)
         if ae.type == "text_start" then thinking = false; nl(t) end
         if config.agent_show_thinking then
           if ae.type == "thinking_delta" then
-            if not thinking then nl(t); t.s = t.s .. "∴ "; thinking = true end
-            t.s = t.s .. (ae.delta or ""):gsub("\n", "\n∴ ")
+            local pre = config.agent_thinking_prefix
+            if not thinking then nl(t); t.s = t.s .. pre; thinking = true end
+            t.s = t.s .. (ae.delta or ""):gsub("\n", function() return "\n" .. pre end)
           elseif ae.type == "thinking_end" then
             thinking = false; nl(t)
           end
@@ -161,7 +161,7 @@ function M.parse_pi(raw)
           byid[e.toolCallId or ""] = seg
         else
           local t = text()
-          nl(t); t.s = t.s .. "⚙ " .. (e.toolName or "?") .. " " .. tool_summary(e.args) .. "\n"
+          nl(t); t.s = t.s .. "[" .. (e.toolName or "?") .. "] " .. tool_summary(e.args) .. "\n"
           byid[e.toolCallId or ""] = t
         end
       elseif e.type == "tool_execution_end" then
@@ -173,7 +173,7 @@ function M.parse_pi(raw)
           end
           seg.result = table.concat(out, "\n")
         elseif seg and e.isError then
-          seg.s = seg.s:gsub("\n$", "") .. " ✗\n"
+          seg.s = seg.s:gsub("\n$", "") .. " (failed)\n"
         end
       elseif e.type == "turn_end" and type(e.message) == "table" and e.message.stopReason == "error" then
         local t = text()
@@ -186,7 +186,7 @@ function M.parse_pi(raw)
   return segs, parsed, finished
 end
 
--- A cell the agent wrote: `% cmd  # ⚙` for a one-line shell command, else a fenced
+-- A cell the agent wrote: `% cmd  # agent` for a one-line shell command, else a fenced
 -- input cell whose first body line is the tag.
 local function cell_lines(lang, code)
   local m = config.marker
@@ -200,15 +200,15 @@ local function cell_lines(lang, code)
 end
 
 -- Split a text segment into prose lines and proposed cells (`sh %` / `python %`
--- blocks, which arrive sanitised as ˋˋˋ). An unterminated block stays prose.
+-- blocks, which arrive sanitised as '''). An unterminated block stays prose.
 local function split_proposals(text)
   local prose, cells, cur = {}, {}, nil
   local m = vim.pesc(config.marker)
   for _, l in ipairs(vim.split(sanitize(text), "\n", { plain = true })) do
-    local lang = l:match("^ˋˋˋ([%w_+%-]*)%s+" .. m .. "%s*$")
+    local lang = l:match("^'''([%w_+%-]*)%s+" .. m .. "%s*$")
     if not cur and lang then
       cur = { lang = lang, body = {}, raw = { l } }
-    elseif cur and l:match("^ˋˋˋ%s*$") then
+    elseif cur and l:match("^'''%s*$") then
       cells[#cells + 1] = cell_lines(cur.lang, table.concat(cur.body, "\n")); cur = nil
     elseif cur then
       cur.body[#cur.body + 1] = l; cur.raw[#cur.raw + 1] = l

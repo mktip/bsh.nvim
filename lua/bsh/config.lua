@@ -41,7 +41,7 @@ M.transports = {
 M.agent_template = "web"
 
 -- Which harness runs `>` cells: "pi" (headless `pi --mode json`: tool calls stream
--- in as `⚙ name arg` lines), "llm" (the `llm` CLI + agent_template above), or
+-- in as `[tool] arg` lines), "llm" (the `llm` CLI + agent_template above), or
 -- "auto" (pi if it's on $PATH, else llm).
 M.agent = "auto"
 -- pi: tools a plain `>` may use (read-only by default); a `!` (`>!`) swaps in
@@ -62,9 +62,13 @@ M.agent_prompt_run = "You can run commands with your bash tool: do that rather t
     .. "user to run them, and never propose commands in `sh %` blocks."
 -- `>>` (stateful) cells cap the thread they send at this many characters (oldest cut).
 M.agent_max_context = 60000
--- pi: show the model's reasoning (as `∴ ` lines above the answer), and how hard it
+-- pi: show the model's reasoning (as lines starting with agent_thinking_prefix above
+-- the answer; keep it something `>`-free and quiet), and how hard it
 -- thinks (--thinking: off|minimal|low|medium|high|xhigh|max; nil = pi's default).
 M.agent_show_thinking = true
+M.agent_thinking_prefix = "| "
+-- start with the thinking folded away (`<localleader>t` / :BshThinking toggles it).
+M.agent_hide_thinking = false
 M.agent_thinking = nil
 -- pi: keep one conversation per buffer (follow-up `>` cells remember earlier ones).
 M.agent_continue = false

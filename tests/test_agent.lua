@@ -36,8 +36,8 @@ T["decode_pi: thinking + text deltas + tool lines, partial tail skipped"] = func
   }, "\n"))]])
   -- text / tool call / text, flat: tool calls that can be re-run are cells (with the
   -- result pi saw); other tools stay `⚙` notes inside the text
-  eq(out, table.concat({ "```agent", "∴ a", "∴ b", "```", "% ls   -l  # ⚙", "```out", "total 0", "```",
-    "```agent", "⚙ read x.lua ✗", "done", "```" }, "\n"))
+  eq(out, table.concat({ "```agent", "| a", "| b", "```", "% ls   -l  # agent", "```out", "total 0", "```",
+    "```agent", "[read] x.lua (failed)", "done", "```" }, "\n"))
 end
 
 T["decode_pi: non-JSON output passes through raw"] = function()
@@ -50,8 +50,8 @@ T["`>` cell runs pi headless and renders its events (``` neutralised)"] = functi
   H.bootstrap(child, { lines = { "> say hi" } })
   child.lua("vim.env.PATH = ... .. ':' .. vim.env.PATH; require('bsh.config').agent = 'pi'", { dir })
   H.run(child, 1)
-  eq(H.lines(child), { "> say hi", "```agent", "∴ hmm", "```", "% ls '/tmp'  # ⚙", "```out", "(no result)", "```",
-    "```agent", "Hello ˋˋˋworld", "```" })
+  eq(H.lines(child), { "> say hi", "```agent", "| hmm", "```", "% ls '/tmp'  # agent", "```out", "(no result)", "```",
+    "```agent", "Hello '''world", "```" })
 end
 
 -- A fake `pi` that echoes the prompt it was given (its last argv) back as the reply,
@@ -113,14 +113,14 @@ T["proposed `sh %` blocks are lifted out of the agent fence into live cells"] = 
   boot({ "> suggest" })
   child.lua("vim.env.FAKE_PI_REPLY = ...", { "Try this:\n```sh %\nls -la\n```\nthen look." })
   H.run(child, 1)
-  eq(H.lines(child), { "> suggest", "```agent", "Try this:", "then look.", "```", "", "% ls -la  # ⚙" })
+  eq(H.lines(child), { "> suggest", "```agent", "Try this:", "then look.", "```", "", "% ls -la  # agent" })
 end
 
 T["a multi-line proposal becomes a tagged fence cell"] = function()
   boot({ "> suggest" })
   child.lua("vim.env.FAKE_PI_REPLY = ...", { "Run:\n```sh %\nfor f in a b; do\n  echo $f\ndone\n```" })
   H.run(child, 1)
-  eq(H.lines(child), { "> suggest", "```agent", "Run:", "```", "", "```sh %", "# ⚙", "for f in a b; do",
+  eq(H.lines(child), { "> suggest", "```agent", "Run:", "```", "", "```sh %", "# agent", "for f in a b; do",
     "  echo $f", "done", "```" })
 end
 
@@ -130,7 +130,18 @@ T["re-running `>` replaces the whole previous run, but not your own cells"] = fu
   H.run(child, 1)
   child.lua("vim.api.nvim_buf_set_lines(0, -1, -1, false, { '', '% echo mine' })")
   H.run(child, 1)
-  eq(H.lines(child), { "> suggest", "```agent", "A", "B", "```", "", "% ls  # ⚙", "", "% echo mine" })
+  eq(H.lines(child), { "> suggest", "```agent", "A", "B", "```", "", "% ls  # agent", "", "% echo mine" })
+end
+
+T["thinking lines fold on their own (foldlevel 1 hides them, fences stay open)"] = function()
+  H.bootstrap(child, { lines = { "> q", "```agent", "| a", "| b", "answer", "```" } })
+  child.lua("vim.wo.foldlevel = 1")
+  eq(child.lua_get("vim.fn.foldclosed(3)"), 3) -- thinking folded
+  eq(child.lua_get("vim.fn.foldclosedend(3)"), 4)
+  eq(child.lua_get("vim.fn.foldclosed(5)"), -1) -- the answer stays visible
+  eq(child.lua_get("vim.fn.foldclosed(2)"), -1) -- and so does the fence
+  child.cmd("BshThinking") -- toggle back to everything open
+  eq(child.lua_get("vim.fn.foldclosed(3)"), -1)
 end
 
 return T

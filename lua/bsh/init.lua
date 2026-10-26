@@ -507,7 +507,7 @@ function M.attach(buf)
     vim.opt_local.foldmethod = "expr"
     vim.opt_local.foldexpr = "v:lua.require'bsh'.foldexpr(v:lnum)"
     vim.opt_local.foldtext = "v:lua.require'bsh'.foldtext()"
-    vim.opt_local.foldlevel = 99
+    vim.opt_local.foldlevel = config.agent_hide_thinking and 1 or 99
     vim.opt_local.fillchars:append("fold: ")
   end)
 
@@ -556,6 +556,18 @@ function M.attach(buf)
     { desc = "cancel the running cell under the cursor" })
   vim.api.nvim_buf_create_user_command(buf, "BshReset", function(o) reset_here(o.bang) end,
     { bang = true, desc = "reset the session for the cell under the cursor (! = all in buffer)" })
+
+  -- <localleader>t / :BshThinking -- hide or show the agent's thinking lines (a
+  -- fold level of 1 closes the nested thinking folds, 99 opens everything).
+  local function toggle_thinking()
+    vim.api.nvim_buf_call(buf, function()
+      vim.opt_local.foldlevel = vim.wo.foldlevel < 99 and 99 or 1
+    end)
+  end
+  vim.keymap.set("n", "<localleader>t", toggle_thinking,
+    { buffer = buf, desc = "bsh: hide/show the agent's thinking" })
+  vim.api.nvim_buf_create_user_command(buf, "BshThinking", toggle_thinking,
+    { desc = "hide/show the agent's thinking lines" })
 
   -- <localleader>r / :BshReplay — replay this session from the top through the
   -- cell under the cursor, into a fresh interpreter (resets first, then re-runs

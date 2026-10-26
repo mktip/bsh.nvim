@@ -185,13 +185,24 @@ end
 local OPEN = "^%s*```%S"
 local FENCE = "^%s*```%s*$"
 
+-- A run of agent "thinking" lines (they start with config.agent_thinking_prefix)
+-- inside a fence is its own nested fold, level 2: a foldlevel of 1 hides the
+-- thinking and leaves every fence open (see bsh.toggle_thinking).
+local function is_thinking(line)
+  local pre = require("bsh.config").agent_thinking_prefix
+  return pre ~= "" and line:sub(1, #pre) == pre
+end
+
 function M.foldexpr(lnum)
   local line = vim.fn.getline(lnum)
   if line:match(OPEN) or line:match(M.CELL_OPEN) then return ">1" end   -- opener starts a fold
   if line:match(FENCE) or line:match(M.CELL_CLOSE) then return "<1" end -- closer ends it
   for l = lnum - 1, 1, -1 do
     local s = vim.fn.getline(l)
-    if s:match(OPEN) or s:match(M.CELL_OPEN) then return "1" end   -- inside a body
+    if s:match(OPEN) or s:match(M.CELL_OPEN) then -- inside a body
+      if is_thinking(line) then return is_thinking(vim.fn.getline(lnum - 1)) and "2" or ">2" end
+      return "1"
+    end
     if s:match(FENCE) or s:match(M.CELL_CLOSE) then return "0" end -- a closer above
   end
   return "0"
@@ -202,6 +213,10 @@ end
 function M.foldtext()
   local open = vim.fn.getline(vim.v.foldstart)
   local indent = open:match("^(%s*)")
+  if is_thinking(open) then -- a nested run of thinking lines
+    local k = vim.v.foldend - vim.v.foldstart + 1
+    return indent .. "+ thinking (" .. k .. (k == 1 and " line)" or " lines)")
+  end
   -- a `#cell(...)` element folds to `+ % <cmd> (N lines)` (its command, not a tag)
   local cellcmd = open:match('^%s*#cell%(cmd:%s*"(.-)"')
   if cellcmd then
