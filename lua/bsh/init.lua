@@ -187,8 +187,7 @@ local function execute_cell(to_buf)
   -- (shared session, local or remote). The marker is config.marker (default `%`);
   -- one unified match captures the optional doubled form, so `user@host%% cmd`
   -- parses target=`user@host` (NOT `user@host%`, which would corrupt the ssh
-  -- host). In a `.bsh.typ` buffer run_shell stages a `#cell` element; elsewhere an
-  -- ```out fence -- same parse either way (the marker is global, not per-mode).
+  -- host).
   local m = vim.pesc(config.marker)
   local stgt, sdbl, scmd = line:match("^%s*(%S-)(" .. m .. m .. "?)%s+(.+)$")
   if scmd then
@@ -488,17 +487,15 @@ function M.attach(buf)
   if vim.b[buf].bsh_attached then return end
   vim.b[buf].bsh_attached = true
 
-  -- typst comments are `//` (markdown/prose buffers use HTML comments) -- the
-  -- comment style is also how a `% cmd` trigger is hidden from the typeset PDF.
-  vim.bo[buf].commentstring = vim.b[buf].bsh_typst and "// %s" or "<!-- %s -->"
+  vim.bo[buf].commentstring = "<!-- %s -->"
 
   -- A `bsh` buffer is a markdown-fenced doc: point treesitter at the markdown parser
   -- so the fenced code is highlighted AND exposed as a treesitter *injection* -- what
   -- otter (LSP) and conform.nvim's `injected` formatter both read. Only the dedicated
-  -- `bsh` filetype needs this (`.bsh.md` is already markdown; `.bsh.typ` stays typst);
+  -- `bsh` filetype needs this (`.bsh.md` is already markdown);
   -- foreign `:Bsh!` filetypes are mapped, guarded, in bsh.otter. Unconditional (not
   -- otter-gated) so highlighting/formatting work even with config.otter off.
-  if vim.bo[buf].filetype == "bsh" and not vim.b[buf].bsh_typst then
+  if vim.bo[buf].filetype == "bsh" then
     pcall(vim.treesitter.language.register, "markdown", "bsh")
     pcall(vim.treesitter.start, buf)
   end
@@ -601,7 +598,6 @@ M.config = function()
     pattern = {
       ["%.bsh%.md$"] = "markdown",
       ["%.bsh%.markdown$"] = "markdown",
-      ["%.bsh%.typ$"] = "typst", -- keep typst highlighting; attach below
     },
   })
 
@@ -616,16 +612,6 @@ M.config = function()
     pattern = { "*.bsh.md", "*.bsh.markdown" },
     callback = function(args) M.attach(args.buf) end,
   })
-  -- ...and on `*.bsh.typ`: mark the buffer typst-mode (so `%` is the run marker
-  -- and the result is a `#cell` element) BEFORE attaching.
-  vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile" }, {
-    pattern = { "*.bsh.typ" },
-    callback = function(args)
-      vim.b[args.buf].bsh_typst = true
-      M.attach(args.buf)
-    end,
-  })
-
   -- tear a buffer's persistent `$$` shell down when the buffer is wiped.
   vim.api.nvim_create_autocmd("BufWipeout", {
     callback = function(args) M.stop_session(args.buf) end,
@@ -643,34 +629,24 @@ M.config = function()
       vim.bo.bufhidden = "hide"
     end
   end, { bang = true, desc = "open a scratch bsh buffer (! = attach to current)" })
+end
 
-  -- :BshTypeset -> compile the current `.typ` (a bsh session) to PDF beside it.
-  -- The buffer is the source as-is (single-source: the `#cell` elements bsh wrote
-  -- ARE valid Typst), so this is just `typst compile` with a friendly report.
-  vim.api.nvim_create_user_command("BshTypeset", function()
-    local src = vim.api.nvim_buf_get_name(0)
-    if not src:match("%.typ$") then
-      vim.notify("bsh: :BshTypeset needs a .typ buffer", vim.log.levels.WARN)
-      return
+-- require("bsh").setup({ marker = "$", agent = "llm", ... }): merge options into
+-- bsh.config. The plugin already wires itself up from plugin/bsh.lua, so this
+-- only sets options (and is what lazy.nvim's `config = true` / `opts = {}` call).
+-- Table options (e.g. `transports`) are merged, so adding one keeps the defaults.
+function M.setup(opts)
+  for k, v in pairs(opts or {}) do
+    if config[k] == nil then
+      vim.notify("bsh: unknown option '" .. tostring(k) .. "'", vim.log.levels.WARN)
+    elseif type(v) == "table" and type(config[k]) == "table" and not vim.islist(v) then
+      config[k] = vim.tbl_extend("force", config[k], v)
+    else
+      config[k] = v
     end
-    vim.cmd("write")
-    local out = src:gsub("%.typ$", ".pdf")
-    vim.notify("bsh: typesetting " .. vim.fn.fnamemodify(out, ":t") .. "…")
-    vim.fn.jobstart({ "typst", "compile", src, out }, {
-      stderr_buffered = true,
-      on_stderr = function(_, d) if d and #table.concat(d) > 0 then M._typst_err = d end end,
-      on_exit = function(_, code)
-        vim.schedule(function()
-          if code == 0 then
-            vim.notify("bsh: typeset → " .. vim.fn.fnamemodify(out, ":~"))
-          else
-            vim.notify("bsh: typst failed:\n" .. table.concat(M._typst_err or {}, "\n"),
-              vim.log.levels.ERROR)
-          end
-        end)
-      end,
-    })
-  end, { desc = "compile the current .typ bsh session to PDF" })
+  end
+  vim.env.BSH_MARKER = config.marker
+  return M
 end
 
 -- Public option surface: `require('bsh').python`, `…remote_login`, etc. proxy to

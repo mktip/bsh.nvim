@@ -63,4 +63,17 @@ T["join_path"]["joins, normalises, walks up on .."] = function()
   eq(util.join_path("/a/b", ".."), "/a")
 end
 
+T["setup"] = MiniTest.new_set()
+T["setup"]["merges options, keeps default transports"] = function()
+  local bsh, config = require("bsh"), require("bsh.config")
+  local saved = vim.deepcopy({ marker = config.marker, transports = config.transports })
+  bsh.setup({ marker = "$", transports = { podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" } } })
+  eq(config.marker, "$")
+  eq(vim.env.BSH_MARKER, "$")
+  eq(config.transports.podman[1], "podman")
+  eq(config.transports.docker[1], "docker") -- default kept
+  config.marker, config.transports = saved.marker, saved.transports
+  vim.env.BSH_MARKER = saved.marker
+end
+
 return T

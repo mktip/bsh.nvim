@@ -94,9 +94,7 @@ function M.activate(buf)
     return
   end
 
-  -- `.bsh.typ` (typst) is skipped: typst has no ```lang fences for otter to find.
   local ft = vim.bo[buf].filetype
-  if vim.b[buf].bsh_typst then return end
   -- An empty-filetype buffer (a bare `:Bsh!` scratch) has no host highlighting to
   -- preserve, so adopt `bsh` outright; everything else keeps its filetype and is
   -- mapped onto the markdown parser in place (a no-op when it already is markdown).

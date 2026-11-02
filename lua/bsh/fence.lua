@@ -88,69 +88,6 @@ function M.stage_fence(buf, trow, indent, tag, placeholder)
     indent .. "```" .. tag, indent .. placeholder, indent .. "```")
 end
 
--- ───────────────────────────── typst `#cell` elements ───────────────────────
--- In a `.bsh.typ` buffer the owned result is a `#cell(...)` ELEMENT, not a
--- ```out fence, so it carries the command and run-context as STRUCTURED FIELDS
--- the template typesets into a terminal card. The region is:
---     #cell(cmd: "ls -al", host: none, cwd: "~", code: 0)[```
---     <body>
---     ```]
--- The body is still a raw block, so the body extmark + inline_paint (which only
--- ever rewrite the body rows) work UNCHANGED; only the opener/closer differ.
-M.CELL_OPEN = "^%s*#cell%(.*%)%[```$"
-M.CELL_CLOSE = "^%s*```%]%s*$"
-
-local function tq(s) -- quote a Lua string as a Typst string literal
-  return '"' .. tostring(s or ""):gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
-end
-
--- Build the `#cell(...)` opener line from a meta table { cmd, host, cwd, code }.
--- Absent host/cwd render as `none`; code defaults to `none` (filled post-run).
-local function cell_opener(indent, meta)
-  local host = (meta.host and meta.host ~= "") and tq(meta.host) or "none"
-  local cwd = (meta.cwd and meta.cwd ~= "") and tq(meta.cwd) or "none"
-  local code = meta.code ~= nil and tostring(meta.code) or "none"
-  return string.format("%s#cell(cmd: %s, host: %s, cwd: %s, code: %s)[```",
-    indent, tq(meta.cmd), host, cwd, code)
-end
-
--- Locate the `#cell` region owned by the trigger on `trow` (the empty range =
--- none yet, insert fresh). Parallel to fence_range but for #cell delimiters.
-local function cell_range(buf, trow)
-  local open = trow + 1
-  local total = vim.api.nvim_buf_line_count(buf)
-  if open >= total then return open, open end
-  local l = vim.api.nvim_buf_get_lines(buf, open, open + 1, false)[1] or ""
-  if not l:match(M.CELL_OPEN) then return open, open end
-  for r = open + 1, total - 1 do
-    local ll = vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or ""
-    if ll:match(M.CELL_CLOSE) then return open, r + 1 end
-  end
-  return open, open + 1
-end
-
--- Stage a `#cell(...)` owned element (replacing any existing one) and return the
--- body extmark, just like stage_fence — so the whole job/paint pipeline above is
--- reused verbatim. `meta` = { cmd, host, cwd, code }.
-function M.stage_cell(buf, trow, indent, meta, placeholder)
-  local start, stop = cell_range(buf, trow)
-  return M.stage_block(buf, start, stop,
-    cell_opener(indent, meta), indent .. placeholder, indent .. "```]")
-end
-
--- Post-run: rewrite the staged opener's `code:` field once the job's exit code is
--- known (the opener sits one line above the body extmark). Called SYNCHRONOUSLY
--- from within on_exit's scheduled block, before the extmark is dropped.
-function M.cell_recode(buf, mark, code)
-  if not vim.api.nvim_buf_is_valid(buf) then return end
-  local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
-  if not pos[1] or pos[1] == 0 then return end
-  local orow = pos[1] - 1
-  local line = vim.api.nvim_buf_get_lines(buf, orow, orow + 1, false)[1] or ""
-  local new = line:gsub("(code:%s*)[%w_]+", "%1" .. tostring(code), 1)
-  if new ~= line then vim.api.nvim_buf_set_lines(buf, orow, orow + 1, false, { new }) end
-end
-
 -- Replace the placeholder body (located via its extmark) with `lines`, each
 -- indented to match the trigger. The closing fence below it is untouched. `n` is
 -- how many body lines are there now: 1 (the placeholder) unless output was
@@ -195,15 +132,15 @@ end
 
 function M.foldexpr(lnum)
   local line = vim.fn.getline(lnum)
-  if line:match(OPEN) or line:match(M.CELL_OPEN) then return ">1" end   -- opener starts a fold
-  if line:match(FENCE) or line:match(M.CELL_CLOSE) then return "<1" end -- closer ends it
+  if line:match(OPEN) then return ">1" end   -- opener starts a fold
+  if line:match(FENCE) then return "<1" end -- closer ends it
   for l = lnum - 1, 1, -1 do
     local s = vim.fn.getline(l)
-    if s:match(OPEN) or s:match(M.CELL_OPEN) then -- inside a body
+    if s:match(OPEN) then -- inside a body
       if is_thinking(line) then return is_thinking(vim.fn.getline(lnum - 1)) and "2" or ">2" end
       return "1"
     end
-    if s:match(FENCE) or s:match(M.CELL_CLOSE) then return "0" end -- a closer above
+    if s:match(FENCE) then return "0" end -- a closer above
   end
   return "0"
 end
@@ -216,12 +153,6 @@ function M.foldtext()
   if is_thinking(open) then -- a nested run of thinking lines
     local k = vim.v.foldend - vim.v.foldstart + 1
     return indent .. "+ thinking (" .. k .. (k == 1 and " line)" or " lines)")
-  end
-  -- a `#cell(...)` element folds to `+ % <cmd> (N lines)` (its command, not a tag)
-  local cellcmd = open:match('^%s*#cell%(cmd:%s*"(.-)"')
-  if cellcmd then
-    local n = vim.v.foldend - vim.v.foldstart - 1
-    return indent .. "+ % " .. cellcmd .. " (" .. n .. (n == 1 and " line)" or " lines)")
   end
   local tag = open:match("```(%S+)") or "out"
   local n = vim.v.foldend - vim.v.foldstart - 1
