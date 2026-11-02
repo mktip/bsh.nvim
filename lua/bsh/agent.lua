@@ -179,6 +179,33 @@ local function session_id(buf)
   return ("%s-%s-4%s-8%s-%s"):format(h:sub(1, 8), h:sub(9, 12), h:sub(14, 16), h:sub(18, 20), h:sub(21, 32))
 end
 
+-- Close the thinking folds in rows [first, last) of a finished reply. Needed because
+-- once a window has had a fold opened by hand (a search does it, via 'foldopen'),
+-- Vim creates new folds open regardless of 'foldlevel'.
+function M.fold_thinking(buf, first, last)
+  local pre = config.agent_thinking_prefix
+  if pre == "" then return end
+  vim.schedule(function()
+    if not vim.api.nvim_buf_is_valid(buf) then return end
+    local lines = vim.api.nvim_buf_get_lines(buf, first, last, false)
+    for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+      if vim.wo[win].foldlevel < 2 then
+        vim.api.nvim_win_call(win, function()
+          local prev = false
+          for i, l in ipairs(lines) do
+            local t = l:sub(1, #pre) == pre
+            local row = first + i
+            if t and not prev and vim.fn.foldlevel(row) >= 2 and vim.fn.foldclosed(row) == -1 then
+              vim.cmd(row .. "foldclose")
+            end
+            prev = t
+          end
+        end)
+      end
+    end
+  end)
+end
+
 -- Start a fresh `>>` conversation for this buffer (the old one stays on disk in pi).
 function M.forget(buf)
   vim.b[buf].bsh_agent_salt = tostring(vim.uv.hrtime())
@@ -254,6 +281,7 @@ function M.run_agent(buf, trow, indent, instruction, stateful, name, bang, attac
     vim.api.nvim_buf_set_lines(buf, top, top + n, false, out)
     n = #out
     vim.api.nvim_buf_set_extmark(buf, fence.ns, top + 1, 0, { id = mark, right_gravity = false })
+    if final and config.agent_hide_thinking then M.fold_thinking(buf, top, top + n) end
   end
   run_job(buf, indent, mark, argv, doc_cwd(buf), agent_transform,
     nil, sink, nil, nil, decode or decode_plain)
