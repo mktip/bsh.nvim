@@ -47,7 +47,7 @@ end
 -- `-H`. `ls -1p` is portable (BSD+GNU) and marks directories with a trailing /.
 --
 -- Special: `: goto <query>` fuzzy-resolves <query> to a path via the user's own
--- `here` helper (fd|fzf --filter, works locally or on the remote target) and
+-- `fd | fzf --filter` (or your own `here` command; locally or on the remote) and
 -- lists THAT -- so you can jump by a remembered fragment of a folder's name.
 local function run_list(buf, trow, indent, target, rest)
   local path, flags = parse_list_args(rest)
@@ -81,14 +81,19 @@ local function run_list(buf, trow, indent, target, rest)
     end)
 end
 
--- `: goto <query>` : resolve <query> with `here` (prints the best fuzzy path),
--- then rewrite the trigger to `: <resolved-path>` and list it in place -- the
+-- `: goto <query>` : resolve <query> to the best fuzzy-matching directory under
+-- $HOME (a `here` command on PATH if you have one, else `fd | fzf --filter`), then
+-- rewrite the trigger to `: <resolved-path>` and list it in place -- the
 -- same oil-style rewrite as drilling into a folder, just with a fuzzy entry
--- point. Works on the remote target too (its own `here`/$HOME).
+-- point. Works on the remote target too (resolved there, against its own $HOME).
+local GOTO_SH = [[q=%s
+if command -v here >/dev/null 2>&1; then here "$q"
+else fd -t d . "$HOME" 2>/dev/null | fzf --filter "$q" 2>/dev/null | head -n 1; fi]]
+
 function run_goto(buf, trow, indent, target, query, flags)
   local mark = stage_fence(buf, trow, indent, flags.tree and "tree" or "dir", "...resolving...")
   local out = {}
-  local jb = vim.fn.jobstart(build_argv(target, "here " .. vim.fn.shellescape(query)), {
+  local jb = vim.fn.jobstart(build_argv(target, GOTO_SH:format(vim.fn.shellescape(query))), {
     cwd = target == "" and doc_cwd(buf) or nil,
     stdout_buffered = true,
     on_stdout = function(_, d) out = d or {} end,

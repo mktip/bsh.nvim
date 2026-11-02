@@ -1,5 +1,5 @@
 -- The namespace: the directory tree under $BSH_HOME *is* a command palette,
--- 1:1, no registry. A dotted name (`llm.tools.weather`) maps to a path (dots ->
+-- 1:1, no registry. A dotted name (`demo.weather`) maps to a path (dots ->
 -- slashes); <CR> runs it (file by shebang / dir's `.enter` / else lists it) and
 -- `foo.bar!` edits or scaffolds its source. The run goes through `$`'s one-shot
 -- shell, so a leaf is a true shell continuation (redirection/pipes/globs/$()).
@@ -29,12 +29,12 @@ local function cell_emit(code, lines)
   return nil
 end
 
--- The namespace root ($BSH_HOME, default ~/pockt/bsh). Returns "" when it
+-- The namespace root ($BSH_HOME, default ~/.config/bsh). Returns "" when it
 -- doesn't exist, so namespace cells simply don't fire if it isn't set up (prose
 -- stays prose). The directory tree under it IS the namespace, 1:1, no registry.
 function M.ns_home()
   local h = vim.env.BSH_HOME
-  if not h or h == "" then h = "~/pockt/bsh" end
+  if not h or h == "" then h = "~/.config/bsh" end
   h = vim.fn.expand(h)
   return vim.fn.isdirectory(h) == 1 and h or ""
 end
@@ -53,7 +53,7 @@ local function run_ns_exec(buf, trow, indent, path, args, to_buf)
 end
 
 -- A `namespace` cell resolves a dotted name to a path under $BSH_HOME (dots ->
--- slashes): `llm.tools.weather`. Enter dispatches on what's there:
+-- slashes): `demo.weather`. Enter dispatches on what's there:
 --   * a file is executed by its shebang into an `out` fence (so a dual-purpose
 --     `weather.py` runs its `__main__`); the leaf may carry any extension
 --     (`...weather` matches `weather` or `weather.<ext>`) since dispatch is

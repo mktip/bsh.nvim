@@ -1,0 +1,199 @@
+*bsh.txt*  A shell that lives in a Neovim buffer
+
+==============================================================================
+CONTENTS                                                        *bsh-contents*
+
+  1. Introduction ............................ |bsh-intro|
+  2. Cells ................................... |bsh-cells|
+  3. Keys and commands ....................... |bsh-keys|
+  4. Routes: ssh, containers ................. |bsh-routes|
+  5. Agent cells ............................. |bsh-agent|
+  6. Your own commands ($BSH_HOME) ........... |bsh-namespace|
+  7. Configuration ........................... |bsh-config|
+  8. Limitations ............................. |bsh-limitations|
+
+==============================================================================
+1. INTRODUCTION                                                    *bsh-intro*
+
+bsh turns a buffer into a shell. Write `% command` on a line and press <CR>:
+the output lands in a ```out fence right below, which bsh owns. Running the
+cell again replaces that fence instead of appending a new one. Everything else
+in the buffer is ordinary text.
+
+bsh attaches to `*.bsh` files (filetype `bsh`) and to `*.bsh.md` /
+`*.bsh.markdown` files (which keep the markdown filetype).
+
+                                                                  *:Bsh* *:Bsh!*
+:Bsh            Open a scratch bsh buffer.
+:Bsh!           Turn the current buffer into a bsh buffer.
+
+The plugin sets itself up when loaded. Call |bsh.setup()| only to change
+options. Run `:checkhealth bsh` to see which optional tools are available.
+
+==============================================================================
+2. CELLS                                                           *bsh-cells*
+
+The examples use the default run marker `%` (see |bsh-config|, `marker`).
+
+`% cmd`             Run once in a fresh `sh -c`. Runs in the file's directory.
+`%% cmd`            Run in the buffer's persistent shell. `cd`, `export`,
+                    shell variables and venvs carry over between `%%` cells.
+`user@host% cmd`    Run over ssh. `user@host%% cmd` is a persistent remote
+                    shell. See |bsh-routes|.
+```%% ... ```       A multiline shell block. <CR> anywhere inside runs it.
+                    ```% is the one-shot version.
+```python % ...     Python, one-shot. ```python %% is a persistent
+                    interpreter: imports and globals carry over. A route works
+                    here too: ```python user@host%%
+`: path`            List a directory into a ```dir fence. <CR> on an entry
+                    drills into a folder or opens a file. Flags: `-T` for a
+                    foldable tree, `-H` to include dotfiles.
+`: goto query`      Jump to the best fuzzy match for `query` among directories
+                    under $HOME (uses your `here` command if you have one,
+                    else `fd` + `fzf --filter`), then list it.
+`user@host: path`   List a remote directory.
+`> question`        Ask an agent. See |bsh-agent|.
+`https://...`       A URL on its own line opens in the browser.
+`name.space`        Run a command from $BSH_HOME. See |bsh-namespace|.
+
+Results fold to a one-line summary (`+ out (12 lines)`); use |za| as usual.
+
+==============================================================================
+3. KEYS AND COMMANDS                                                *bsh-keys*
+
+All mappings are buffer-local.
+
+<CR>                Run the cell under the cursor, output inline. On a line
+                    that isn't a cell, <CR> keeps its usual meaning.
+g<CR>  <C-CR>       Run it with output sent to a side buffer (`bsh://out/...`).
+                    The cell keeps a ```log reference; <CR> on it opens the
+                    buffer. The cell stays routed there until you delete that
+                    fence. <C-CR> needs a terminal that speaks the kitty
+                    keyboard protocol; g<CR> always works.
+{Visual}<CR>        When the selection ends on a `>` cell, ask it with the
+                    other selected lines attached as context.
+<C-c>                                                             *:BshCancel*
+:BshCancel          Cancel the running cell under the cursor. A one-shot is
+                    stopped and marked `[cancelled]`; a session cell gets
+                    SIGINT, so the session itself survives.
+<C-k>                                                              *:BshReset*
+:BshReset[!]        Reset the session under the cursor: the next run starts a
+                    fresh shell or interpreter. With ! reset every session in
+                    the buffer.
+<localleader>r                                                    *:BshReplay*
+:BshReplay          Reset the session under the cursor, then re-run its cells
+                    from the top of the file down to the cursor.
+<localleader>t                                                  *:BshThinking*
+:BshThinking        Hide or show the agent's thinking lines.
+                                                                   *:BshForget*
+:BshForget          Start a new `>>` conversation for this file.
+
+==============================================================================
+4. ROUTES: SSH, CONTAINERS                                        *bsh-routes*
+
+The part before the marker (or before `:` for listings) is a route. A bare
+`host` or `user@host` is ssh, so aliases from ~/.ssh/config work. A
+`scheme@addr` hop uses the transport named `scheme`, and hops chain with `/`,
+outermost first:
+>
+    docker@api% ps aux
+    me@server/docker@api% ps aux
+<
+Transports are argv templates with `{addr}` and `{cmd}` holes, or a
+`function(addr, inner) -> argv`. Docker is the only one defined by default:
+>lua
+    require("bsh").setup({
+      transports = {
+        podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
+        jail = { "jexec", "{addr}", "sh", "-lc", "{cmd}" },
+      },
+    })
+<
+Remote sessions can't be interrupted with <C-c> (it would only reach the local
+ssh client); reset them with <C-k> instead.
+
+==============================================================================
+5. AGENT CELLS                                                     *bsh-agent*
+
+`> question` runs a headless agent and writes its reply into an ```agent
+fence: its text, thinking as lines starting with `| `, and one `[tool] arg`
+line per tool call. It uses pi (https://pi.dev) if installed, else the `llm`
+CLI.
+
+`> question`        No memory: the agent sees only the question (and any
+                    lines attached with {Visual}<CR>).
+`>> question`       Continue this file's conversation. With pi, pi keeps the
+                    conversation (one per file path), so deleting cells doesn't
+                    make it forget; |:BshForget| starts over. With llm, or with
+                    `agent_thread = "document"`, it re-reads the cells above
+                    instead, back to the nearest `>`, heading or `---` line.
+`>! question`       Let the agent run commands and edit files (pi:
+                    `agent_tools_write`; llm: `--td`). Without `!` it's
+                    read-only.
+`[name]> question`  Use model `name` (pi) or template `name` (llm).
+
+==============================================================================
+6. YOUR OWN COMMANDS ($BSH_HOME)                               *bsh-namespace*
+
+The directory in $BSH_HOME (default ~/.config/bsh) is a command namespace.
+A dotted name maps to a path: `git.undo` runs `$BSH_HOME/git/undo` (any
+extension). Files run by their shebang. A folder runs its `.enter` script if
+it has one.
+
+`name.space args`   Run it in the file's directory. The arguments are shell
+                    syntax: pipes, redirects and `$(...)` work.
+`name.`             List a folder as a navigable menu.
+`name.space!`       Open the command's source, or scaffold a new executable
+                    after a confirmation.
+
+Exit codes let a command talk back:
+  150 (`menu_exit`)   The output is a menu: <CR> on a line re-runs the command
+                      with that line appended as one more argument.
+  151 (`cell_exit`)   The first output line is a new cell that replaces the
+                      trigger, e.g. `docker@<id>%% `. $BSH_MARKER holds the
+                      current run marker.
+
+`bin/bsh` is a small script that resolves the same names from any shell, in
+the current directory: `bsh git.undo`. Put it on $PATH to use your commands in
+`%%` sessions, a terminal, or over ssh.
+
+==============================================================================
+7. CONFIGURATION                                      *bsh-config* *bsh.setup()*
+
+>lua
+    require("bsh").setup({ marker = "$" })
+<
+Table options (like `transports`) are merged with the defaults. Options can
+also be set directly: `require("bsh").python = "python3.12"`.
+
+marker              Run marker. Default `"%"`.
+remote_login        Run remote cells in a login shell. Default `true`.
+transports          Route schemes, see |bsh-routes|.
+python              Interpreter for python cells. Default `"python3"`.
+agent               `"auto"`, `"pi"` or `"llm"`. Default `"auto"`.
+agent_thread        `"session"` or `"document"`, see |bsh-agent|.
+agent_tools         pi tools for `>`. Default `"read,grep,find,ls"`.
+agent_tools_write   pi tools for `>!`.
+agent_template      llm template. Default `"web"`.
+agent_thinking      pi `--thinking` level, or `false` for pi's default.
+agent_show_thinking Show thinking lines. Default `true`.
+agent_hide_thinking Start with thinking folded. Default `false`.
+agent_thinking_prefix  Prefix of thinking lines. Default `"| "`.
+agent_max_context   Max characters `>>` sends in document mode.
+otter               LSP in python fences via otter.nvim: `"auto"`, `true`,
+                    `false`. Default `"auto"`.
+scaffold_lang       Language for `name!` scaffolds: `"sh"` or `"python"`.
+menu_exit           Default `150`.
+cell_exit           Default `151`.
+prompt_badge        Show a session cell's cwd at end of line. Default `false`.
+
+See lua/bsh/config.lua for the full description of each option.
+
+==============================================================================
+8. LIMITATIONS                                               *bsh-limitations*
+
+- No TTY: interactive programs and password prompts don't work. Use key-based
+  ssh authentication.
+- No shell history or completion. The buffer is the history.
+
+ vim:tw=78:ts=8:ft=help:norl:

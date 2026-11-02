@@ -1,87 +1,236 @@
 # bsh.nvim
 
-> HIGHLY EXPERIMENTAL, AI WRITTEN, YET TO BE REVIEWED
-> and if you already viewing this file in neovim with bsh installed, call :Bsh!
-
 **Buffer SHell**: a shell that lives in a Neovim buffer instead of a terminal.
 
 ![bsh.nvim demo](assets/vhs/bsh.gif)
 
-Point at a `% command`, press `<CR>`, and bsh runs it — writing the result into
-an owned `out` fence right below. The whole session is an ordinary, editable
-buffer: search it, fold it, edit the output in place, and save it as a file.
+Write `% command` on a line and press `<CR>`. bsh runs it and puts the output in
+an `out` fence right below. Run it again and that fence is replaced, not
+duplicated. The whole session is an ordinary buffer: search it, fold it, edit
+the output in place, and save it as a file you can share or re-run later.
 
-## Features
+> [!WARNING]
+> Experimental. Most of this was written with AI assistance and hasn't had a
+> careful human review yet. Expect rough edges, and don't point it at anything
+> you can't afford to break.
 
-- **Shell cells** — `% cmd` runs in place; output lands in an `out` fence below,
-  and re-running rewrites that fence idempotently.
-- **Persistent sessions** — `%% cmd` keeps a shell session across cells (cwd,
-  env, variables); a plain `%` is one-shot.
-- **Remote** — prefix with `user@host` (e.g. `user@host% cmd`,
-  `user@host: ~/dir`) to run over ssh; listings and files work remotely too.
-- **Redirect & cancel** — `<C-CR>` (or `g<CR>`) sends long output to a scratch
-  buffer, leaving a linkable `log` reference; `<C-c>` cancels a running command.
-- **Editable output** — it's just buffer text: edit it, search it, fold it, do
-  all the nvim magic your heart desires.
-- **File explorer** — `: path` lists a directory; add `-T` for a foldable tree;
-  `<CR>` drills into folders and opens files (remote paths included).
-- **Code fences** — open a block with `lang %` (e.g. `python %`) to run it;
-  `lang %%` shares one interpreter session across blocks (python today, more
-  language drivers planned).
-- **LLM cells** — `> ask` is stateless; `>> ask` joins the file's ongoing conversation
-  (pi remembers it even if you delete the cells; `:BshForget` starts over, or set
-  `agent_thread = "document"` to have `>>` re-read the cells above it instead). To hand it part of the file, visually select the lines
-  *ending on the `>` cell* and press `<CR>`. Commands the agent proposes (a
-  `sh %` block) land below as live cells; you run them, and the output joins the
-  thread. Runs headless [pi](https://pi.dev) (else `llm`), read-only unless the
-  arrows end in `!`; tool calls stream in as `[tool] arg` lines; a `[name]`
-  before the arrows picks the model.
-- **Namespace commands** — a dotted name like `demo.reverse` maps to a script
-  under `$BSH_HOME`; directories list as navigable menus, and `name!` edits or
-  scaffolds the source.
-- **Shareable & replayable** — sessions are plain `*.bsh` / `*.bsh.md` files;
-  `:BshReplay` re-runs a saved session's cells (typst export planned).
-
-## Motive
-
-I'm frustrated with how uneditable the regular shell interface is, and one must
-rely on terminal creators to support any form of intractability with the shell
-outputs (highlighting urls, reverse output search, scroll). What if my shell,
-was an nvim buffer, where i can search, edit, do all the nvim magic my heart
-desires? I want to edit my terminal window however I like, and that's what this
-project provides me. (although I do lose... interactive commands, shell
-history, and... many other things, alas.. hopefully temporarily.. temporarily..)
-
-(A secondary benefit is that I can share my shell sessions as markdown files (and
-hopefully soon, nicely formatted typst documents (pdf, html (maybe), etc))
-
-## Install
-
+## Quick start
 
 ```lua
 -- lazy.nvim
-{ "mktip/bsh.nvim", config = true }   -- or just drop the repo on your runtimepath
+{ "mktip/bsh.nvim", opts = {} }
 ```
 
-`bsh` attaches automatically to `*.bsh/*.bsh.md` files. Turn any buffer into a shell on
-demand with `:Bsh!`; `:Bsh` opens a fresh scratch one.
+Then open any `notes.bsh` or `notes.bsh.md` file (or run `:Bsh` for a scratch
+buffer, `:Bsh!` to turn the current buffer into one), and type:
 
-> Optional prerequisites (i think, i didn't review it):
-> [otter.nvim](https://github.com/jmbuhr/otter.nvim) (for lsp in codeblocks),
-> [conform.nvim](https://github.com/stevearc/conform.nvim) (for formatting in codebooks),
-> [pi](https://pi.dev) or [llm](https://github.com/simonw/llm) (for LLM cells; see `config.agent`)
+```
+% uname -a
+```
 
-## In the pipeline
+Put the cursor on it and press `<CR>`. For a guided tour, open
+[`examples/playground.bsh`](examples/playground.bsh).
 
-- [ ] Adding ruby support (and a more generic way of supporting different language drivers)
-- [ ] Adding container/jails shell support (even across the seas) and means of adding different transports
-- [ ] Just as the markdown-ish support, hopefully <filename>.bsh.typ will be supported too
-- [ ] A better way to define and interact with menus/commands. (currently relying on unused return values to communicate certain needs)
-- [ ] Reviewing it like a human being (but man is short on free time)
+## Cells
+
+A cell is a line (or a fenced block) that bsh knows how to run.
+
+| Cell | What it does |
+|------|--------------|
+| `% cmd` | run once in a fresh shell, output in an `out` fence below |
+| `%% cmd` | run in the buffer's persistent shell: `cd`, `export`, venvs carry over |
+| `user@host% cmd` | the same over ssh (`user@host%% cmd` for a persistent remote shell) |
+| `docker@id% cmd` | inside a container (any transport you define, see below) |
+| ` ```%% ` … ` ``` ` | a multiline shell block; `<CR>` anywhere inside runs it |
+| ` ```python % ` / ` ```python %% ` | Python, one-shot or a persistent interpreter (remote too: ` ```python user@host%% `) |
+| `: path` | list a directory; `<CR>` on an entry drills in or opens the file |
+| `: path -T` / `-H` | a foldable tree / include dotfiles |
+| `: goto query` | fuzzy-jump to a directory under `$HOME` (needs `fd` + `fzf`), then list it |
+| `user@host: path` | the same, on a remote machine |
+| `> question` | ask an AI agent, no memory (see [Agent cells](#agent-cells)) |
+| `>> question` | ask in this file's ongoing conversation |
+| `https://…` | open the URL in your browser |
+| `name.space` | run a script from your `$BSH_HOME` (see [Your own commands](#your-own-commands)) |
+
+Lines that aren't cells are just text: write notes between them. Output streams
+in live, and every result fence folds to a one-line summary (`za`).
+
+## Keys
+
+| Key | Action |
+|-----|--------|
+| `<CR>` | run the cell under the cursor (output inline) |
+| `g<CR>` / `<C-CR>` | run it, sending output to a side buffer (for long logs, `tail -f`, servers); the cell keeps a `log` link, `<CR>` on it opens the buffer |
+| `<C-c>` | cancel the running cell (a session cell is interrupted; the session survives) |
+| `<C-k>` | reset the session under the cursor (fresh shell / interpreter) |
+| `<localleader>r` | replay a session from the top down to the cursor, in a fresh interpreter |
+| `<localleader>t` | hide / show the agent's thinking lines |
+| visual `<CR>` | when the selection ends on a `>` cell, ask it with the selected lines attached |
+
+Commands: `:Bsh[!]`, `:BshCancel`, `:BshReset[!]` (`!` = every session in the
+buffer), `:BshReplay`, `:BshThinking`, `:BshForget`. See `:h bsh` for details.
+
+> `<C-CR>` only reaches Neovim in terminals that speak the kitty keyboard
+> protocol (kitty, foot, WezTerm, Ghostty...). `g<CR>` always works.
+
+## Remote machines and containers
+
+The part before the marker is a **route**. A bare `host` or `user@host` is ssh
+(your `~/.ssh/config` aliases work). Anything else is a `scheme@addr` hop whose
+scheme you define, and hops chain with `/`:
+
+```
+me@server% uname -a              # ssh
+docker@api% ps aux               # docker exec
+docker@api%% cd /srv             # a persistent shell inside the container
+me@server/docker@api% ps aux     # ssh to server, then into its container
+me@server: /var/log              # list a remote directory
+```
+
+Only ssh is built in. Docker ships as an example transport; add your own as argv
+templates with `{addr}` and `{cmd}` holes:
+
+```lua
+require("bsh").setup({
+  transports = {
+    podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
+    jail   = { "jexec", "{addr}", "sh", "-lc", "{cmd}" },
+    kube   = { "kubectl", "exec", "-i", "{addr}", "--", "sh", "-lc", "{cmd}" },
+  },
+})
+```
+
+## Agent cells
+
+`> question` runs a headless agent and writes its reply into an `agent` fence.
+It uses [pi](https://pi.dev) when it's installed, otherwise the
+[`llm`](https://llm.datasette.com/) CLI.
+
+- `>` has no memory: it sees only the question.
+- `>>` continues this file's conversation. With pi, the conversation is
+  remembered by pi itself (keyed to the file path), so deleting cells doesn't
+  make it forget; `:BshForget` starts a new one. With `llm`, or with
+  `agent_thread = "document"`, `>>` instead re-reads the cells above it, back to
+  the nearest `>`, heading or `---`.
+- The agent is read-only by default (it can read and search files). End the
+  arrows with `!` (`>!`, `>>!`) to let it run commands and edit files.
+- Tool calls show up as `[tool] arg` lines and thinking as `| ` lines (hide them
+  with `<localleader>t`).
+- `[model]> question` picks a model (pi) or template (llm).
+- To hand it part of the file, visually select the lines ending on the `>` cell
+  and press `<CR>`.
+
+## Your own commands
+
+Point `$BSH_HOME` at a directory (default `~/.config/bsh`) and its tree becomes a
+dotted command namespace: `git.undo` runs `$BSH_HOME/git/undo`. Any executable
+works; it's run by its shebang, so the extension doesn't matter.
+
+```
+demo.weather Ankara | tr a-z A-Z    # args, pipes and redirects work
+demo.                               # list a folder as a navigable menu
+demo.weather!                       # open its source (or scaffold a new command)
+```
+
+A command can talk back to bsh through its exit code:
+
+- **exit 150**: its output is a **menu**. `<CR>` on a line re-runs the command
+  with that line appended as an argument, so a script can be drilled into.
+- **exit 151**: its first line is a **new cell** that replaces the trigger, e.g.
+  a container picker that hands you a `docker@<id>%% ` shell.
+
+[`examples/bsh-home`](examples/bsh-home) has small examples of each, plus an
+`ssh` picker that lists the hosts from your ssh config and history. Try them with
+`export BSH_HOME=/path/to/bsh.nvim/examples/bsh-home`.
+
+`bin/bsh` resolves the same names from any shell (`bsh git.undo`), running in
+*your* current directory. Put it on your `PATH` to use your commands in `%%`
+sessions, a normal terminal or over ssh.
+
+## Install
+
+Requires **Neovim 0.10+** and a POSIX shell. Everything else is optional:
+
+| For | Install |
+|-----|---------|
+| Python cells | `python3` (`config.python` picks another) |
+| Agent cells | [pi](https://pi.dev) or [`llm`](https://llm.datasette.com/) |
+| `: goto` | [`fd`](https://github.com/sharkdp/fd) and [`fzf`](https://github.com/junegunn/fzf) |
+| LSP inside ` ```python ` fences | [otter.nvim](https://github.com/jmbuhr/otter.nvim) (picked up automatically) |
+
+Run `:checkhealth bsh` to see what's available.
+
+With lazy.nvim, use the spec from [Quick start](#quick-start). With any other
+plugin manager, add the repo to your runtimepath; the plugin sets itself up and
+`setup()` is only needed to change options.
+
+bsh attaches to `*.bsh` (its own filetype) and `*.bsh.md` / `*.bsh.markdown`
+(which stay markdown, so they render nicely on GitHub).
+
+## Configuration
+
+Defaults shown; pass only what you want to change:
+
+```lua
+require("bsh").setup({
+  marker = "%",             -- the run marker; "$" if you prefer
+  remote_login = true,      -- remote cells run in a login shell (loads profile/bashrc)
+  transports = { docker = { "docker", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" } },
+  python = "python3",
+  agent = "auto",           -- "pi", "llm" or "auto" (pi if installed)
+  agent_thread = "session", -- or "document": `>>` re-reads the cells above it
+  agent_tools = "read,grep,find,ls",                         -- pi, for `>`
+  agent_tools_write = "read,grep,find,ls,bash,edit,write",   -- pi, for `>!`
+  agent_thinking = false,   -- pi --thinking level: "low", "high", ...
+  agent_show_thinking = true,
+  agent_hide_thinking = false,  -- start with thinking folded away
+  otter = "auto",           -- LSP in python fences when otter.nvim is installed
+})
+```
+
+All options are documented in [`lua/bsh/config.lua`](lua/bsh/config.lua) and
+`:h bsh-config`.
+
+## Limitations
+
+- No interactive programs: anything that needs a TTY (`vim`, `htop`, password
+  prompts, `ssh` asking for a passphrase) won't work. Use key-based ssh auth.
+- Remote sessions can't be interrupted with `<C-c>`, only reset with `<C-k>`.
+- No shell history or tab completion, at least for now. The buffer is your history.
+
+## Motive
+
+I'm frustrated with how uneditable the regular shell interface is, and how one
+must rely on terminal creators to support any form of interaction with shell
+output (highlighting URLs, searching output, scrolling). What if my shell was a
+Neovim buffer, where I can search, edit, and do all the Neovim magic my heart
+desires? I want to edit my terminal window however I like, and that's what this
+project gives me. (Although I do lose interactive commands, shell history, and
+many other things. Hopefully temporarily.)
+
+A side benefit: sessions are plain `.bsh.md` files, so I can share them as
+markdown.
+
+## Development
+
+```sh
+make test   # headless mini.test suite; fetches mini.nvim into deps/ on first run
+```
+
+The demo GIF is recorded with [VHS](https://github.com/charmbracelet/vhs):
+`vhs assets/vhs/showcase.tape`.
+
+## Roadmap
+
+- More language drivers beyond Python (Ruby next), and a generic way to add them
+- A cleaner protocol for menus and commands than exit codes
+- A proper human review of the code
 
 ## Credits
 
-[Xiki (seems dead)](https://youtu.be/bUR_eUVcABg), [Plan9](https://en.wikipedia.org/wiki/Plan_9_from_Bell_Labs), [Emacs nerds](somewhere)
+Inspired by [Xiki](https://youtu.be/bUR_eUVcABg),
+[Plan 9](https://en.wikipedia.org/wiki/Plan_9_from_Bell_Labs) and Emacs nerds
+everywhere.
 
 ## License
 

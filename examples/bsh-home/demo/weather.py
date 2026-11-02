@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""A dual-purpose llmlab tool — the keystone pattern.
+"""A dual-purpose bsh command / llm tool — the keystone pattern.
 
-  * Run it   (Enter on `llm.tools.weather`, or `python weather.py [city]`):
+  * Run it   (Enter on `demo.weather`, or `python weather.py [city]`):
     the __main__ block fires and prints a quick result.
   * Import it (when `llm` loads it as a plugin, or via `llm --functions`):
     the register_tools hookimpl exposes weather() to the model as a tool.

@@ -49,9 +49,9 @@ function M.run(child, row, to_buf)
     local key = to_buf and 'g<CR>' or '<CR>'
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(key, true, false, true), 'x', false)
     -- Settle briefly, then poll until no `...running` placeholder is left (bounded
-    -- at 1.5s) instead of always sleeping the full window.
+    -- at 5s, for slow CI runners) instead of always sleeping the full window.
     vim.wait(50)
-    vim.wait(1500, function()
+    vim.wait(5000, function()
       for _, l in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
         if l:find('...running', 1, true) then return false end
       end

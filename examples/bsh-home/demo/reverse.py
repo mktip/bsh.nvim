@@ -19,4 +19,4 @@ except ImportError:
 
 
 if __name__ == "__main__":
-    print(reverse(" ".join(sys.argv[1:]) or "hello, llmlab"))
+    print(reverse(" ".join(sys.argv[1:]) or "hello, bsh"))

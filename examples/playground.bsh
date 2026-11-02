@@ -1,26 +1,30 @@
 # bsh playground
 
-Press <CR> (Enter) on a cell to run it. Re-run any cell to refresh its result
-in place -- the ```out / ```dir blocks below a cell are owned by bsh. `za` folds
-a result block. This file is a `.bsh`, so cells are live the moment you open it.
+Press <CR> on a cell to run it. Re-run any cell to refresh its result in place:
+the ```out / ```dir blocks below a cell belong to bsh. `za` folds a result.
 
 
-## one-shot shell   (<CR> = inline output; <C-CR> or g<CR> = output to a side buffer)
+## one-shot shell   (<CR> = inline output; g<CR> or <C-CR> = to a side buffer)
 
 % echo "hello from a fresh shell"; uname -s
 
-## try g<CR> on the next line: output goes to a bsh://out buffer, <CR> the ref to open it
+## try g<CR> here: output goes to a bsh://out buffer, <CR> on the ref opens it
 
-% for i in $(seq 5); do echo "line $i"; done
+% for i in $(seq 200); do echo "line $i"; done
+
+## <C-c> cancels a running cell
+
+% for i in 1 2 3 4 5 6 7 8 9; do echo $i; sleep 1; done
 
 
-## persistent session -- env / cwd carry across cells
+## persistent session: env / cwd carry across %% cells (a plain % is fresh)
 
 %% export GREETING=hi; cd /tmp
 %% echo "$GREETING from $(pwd)"
+% echo "a one-shot still runs in: $(pwd)"
 
 
-## multiline (run <CR> anywhere inside the fence)
+## multiline (<CR> anywhere inside the fence)
 
 ```%%
 for i in 1 2 3; do
@@ -29,7 +33,7 @@ done
 ```
 
 
-## python -- one-shot (%) vs session (%%)
+## python: one-shot (%) vs session (%%)
 
 ```python %
 print("one-shot:", 2 ** 10)
@@ -45,36 +49,38 @@ print("area =", round(math.pi * r * r, 2))   # sees r + math from the cell above
 ```
 
 
-## listing & navigation  (<CR> on an entry drills in / opens)
+## remote: put user@host (or an ssh alias) before the marker
 
-: ~
+<!-- me@myserver% uname -a -->
+<!-- me@myserver: ~ -->
 
-: goto pockt
+
+## files  (<CR> on an entry drills in / opens it; -T = foldable tree, -H = dotfiles)
+
+: .
+
+: .. -T
 
 
-## namespace -- your $BSH_HOME command tree
-## (point BSH_HOME at examples/bsh-home to try these)
-
-llm.tools.weather
-
-llm.tools.weather Ankara
-
-llm.tools.weather Ankara | tr a-z A-Z
-
-llm.tools.reverse hello
-
-## define/edit a command in place: foo.bar! opens its source
-## (scaffolds a new executable, after a confirm, if it doesn't exist yet)
-
-demo.weather!
+## your own commands: $BSH_HOME (point it at examples/bsh-home to try these)
 
 demo.
 
+demo.hello
+
+demo.weather Ankara | tr a-z A-Z
+
+demo.reverse hello
+
 demo.menu
 
-demo.greet
+## foo.bar! opens a command's source (or scaffolds a new one, after a confirm)
+
+demo.weather!
 
 
-## agent (needs the `llm` CLI) -- >> folds in the cell above as context
+## agent (needs `pi`, or the `llm` CLI)
 
 > say hello in one short sentence
+
+>> now say it in French

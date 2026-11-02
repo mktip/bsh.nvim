@@ -237,7 +237,7 @@ local function execute_cell(to_buf)
     local ttarget, trest = trig:match("^%s*(%S-):%s+(.+)$")
     if not trest then
       -- Not a `:` directive -- maybe a namespace listing (dotted trigger, e.g.
-      -- `llm.tools`). Reconstruct its dir under $BSH_HOME and navigate the
+      -- `demo`). Reconstruct its dir under $BSH_HOME and navigate the
       -- entries the same way `:` does, but staying DOTTED: drilling into a subdir
       -- rewrites the trigger to the deeper namespace, files open for editing.
       local nsdot = trig:match("^%s*([%w_][%w_%.%-]*)%s*$")
@@ -320,7 +320,7 @@ local function execute_cell(to_buf)
   end
 
   -- `namespace` cell: a dotted identifier resolving under $BSH_HOME, optionally
-  -- followed by args (`llm.tools.weather Ankara`, `... > out.txt`, `... | grep C`).
+  -- followed by args (`demo.weather Ankara`, `... > out.txt`, `... | grep C`).
   -- The args go through the shell (see run_ns_exec), so the cell is a true shell
   -- continuation. Checked last and gated on the FIRST token resolving, so prose
   -- (which won't resolve) falls through untouched -- args form tried first.

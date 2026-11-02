@@ -30,7 +30,7 @@ fi
 name=$1
 shift
 
-home=${BSH_HOME:-$HOME/pockt/bsh}
+home=${BSH_HOME:-$HOME/.config/bsh}
 [ -d "$home" ] || die "\$BSH_HOME ($home) is not a directory"
 
 # dotted name -> relative path. Strip any trailing dots first (a plugin-only

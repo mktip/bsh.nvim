@@ -17,3 +17,4 @@
 # typst build artifacts
 /typst/*.pdf
 /typst/*.png
+/doc/tags
