@@ -48,10 +48,14 @@ function M.run(child, row, to_buf)
     vim.api.nvim_win_set_cursor(0, { row, 0 })
     local key = to_buf and 'g<CR>' or '<CR>'
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(key, true, false, true), 'x', false)
-    -- Settle briefly, then poll until no `...running` placeholder is left (bounded
-    -- at 5s, for slow CI runners) instead of always sleeping the full window.
+    -- Settle briefly, then poll until the cell is DONE (bounded at 5s, for slow CI
+    -- runners): no `...running` placeholder left AND no job still in flight. The
+    -- placeholder alone isn't enough: output streams in before the process exits,
+    -- and exit-code effects (a `menu` re-tag, an emitted cell) land only after.
     vim.wait(50)
+    local buf = vim.api.nvim_get_current_buf()
     vim.wait(5000, function()
+      if next(require('bsh.fence').inflight[buf] or {}) then return false end
       for _, l in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
         if l:find('...running', 1, true) then return false end
       end
