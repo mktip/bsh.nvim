@@ -1,6 +1,6 @@
 -- Minimal, self-contained Neovim config used ONLY for recording the VHS demo.
 -- Keeps the recording reproducible and free of any personal config. Launch with:
---   nvim --clean -u assets/vhs/init.lua assets/vhs/demo.bsh
+--   nvim --clean -u assets/vhs/init.lua assets/vhs/demo.bsh.md
 -- (--clean skips your user config; -u loads this one instead.)
 
 -- This file lives at <repo>/assets/vhs/init.lua, so the plugin root is three
@@ -22,7 +22,7 @@ vim.g.maplocalleader = ","
 
 vim.o.termguicolors = true
 vim.o.background = "dark"
-vim.o.swapfile = false -- no swap: recording reopens demo.bsh repeatedly
+vim.o.swapfile = false -- no swap: recording reopens demo.bsh.md repeatedly
 vim.o.number = false
 vim.o.signcolumn = "no"
 vim.o.laststatus = 0
@@ -45,4 +45,7 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
--- plugin/bsh.lua auto-loads off runtimepath and attaches to *.bsh buffers.
+-- plugin/bsh.lua auto-loads off runtimepath and attaches to *.bsh / *.bsh.md buffers.
+
+-- keep the agent's reasoning folded in the recording, so the answers stay readable
+require("bsh").setup({ agent_hide_thinking = true })
