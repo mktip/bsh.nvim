@@ -40,6 +40,10 @@ M.transports = {
 -- Point this at a more agentic template if you make one.
 M.agent_template = "web"
 
+-- Inline output stops after this many lines (the rest is counted, not shown; g<CR>
+-- sends everything to a side buffer instead). false = no cap.
+M.output_max_lines = 2000
+
 -- Which harness runs `>` cells: "pi" (headless `pi --mode json`: tool calls stream
 -- in as `[tool] arg` lines), "llm" (the `llm` CLI + agent_template above), or
 -- "auto" (pi if it's on $PATH, else llm).

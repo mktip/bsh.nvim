@@ -336,6 +336,126 @@ local function execute_cell(to_buf)
   return false
 end
 
+-- Is `line` (outside any fence) a cell trigger? `nxt` is the line below it: any
+-- line that already owns a result fence counts, which covers `name.space` cells.
+local OWNED_OPEN = { out = true, dir = true, tree = true, agent = true, log = true, menu = true }
+local function is_trigger(line, nxt)
+  local tag = (nxt or ""):match("^%s*```(%S+)%s*$")
+  if tag and OWNED_OPEN[tag] then return true end
+  local m = vim.pesc(config.marker)
+  if line:match("^%s*%S-" .. m .. m .. "?%s+%S") then return true end
+  if line:match("^%s*%[?[%w_%-]*%]?>+!?%s+%S") then return true end
+  local lt, lr = line:match("^%s*(%S-):%s+(%S.*)$")
+  if lr and (lt == "" or lt:find("@")) then return true end
+  local info = line:match("^%s*```(.+)$")
+  return info ~= nil and parse_runmarker(vim.trim(info), config.marker) ~= nil
+end
+
+-- 1-indexed rows of every cell trigger in `buf`, top to bottom (lines inside a
+-- fence are skipped, except a runnable input fence's opener).
+local function cell_rows(buf)
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local rows, infence = {}, false
+  for i, l in ipairs(lines) do
+    if infence then
+      if l:match("^%s*```%s*$") then infence = false end
+    else
+      if is_trigger(l, lines[i + 1]) then rows[#rows + 1] = i end
+      if l:match("^%s*```") then infence = true end
+    end
+  end
+  return rows
+end
+
+-- ]c / [c : jump to the next / previous cell (count-aware).
+local function jump_cell(dir)
+  local buf = vim.api.nvim_get_current_buf()
+  local cur = vim.api.nvim_win_get_cursor(0)[1]
+  local rows, target = cell_rows(buf), nil
+  for _ = 1, math.max(vim.v.count, 1) do
+    target = nil
+    if dir > 0 then
+      for _, r in ipairs(rows) do if r > cur then target = r; break end end
+    else
+      for i = #rows, 1, -1 do if rows[i] < cur then target = rows[i]; break end end
+    end
+    if not target then break end
+    cur = target
+  end
+  if cur ~= vim.api.nvim_win_get_cursor(0)[1] then
+    vim.cmd("normal! m'")
+    vim.api.nvim_win_set_cursor(0, { cur, 0 })
+    vim.cmd("normal! ^")
+  end
+end
+
+-- io / ao : the result fence under the cursor (or under the trigger on the
+-- cursor line). `io` = its body, `ao` = the whole fence. Linewise, so `yio`
+-- copies a cell's output even while it's folded.
+local function output_span(around)
+  local buf = vim.api.nvim_get_current_buf()
+  local open, close = fence.output_at(buf, vim.api.nvim_win_get_cursor(0)[1])
+  if not open then return nil end
+  if around then return open, close, open end
+  if open + 1 > close - 1 then return nil end -- empty body
+  return open + 1, close - 1, open
+end
+
+function M._select_output(around)
+  local a, b, open = output_span(around)
+  if not a then return end
+  local buf = vim.api.nvim_get_current_buf()
+  local visual = vim.fn.mode():match("[vV\22]")
+  -- an operator takes a closed fold as a whole, so open it for the operator and
+  -- close it again afterwards (if the fence is still there)
+  if vim.fn.foldclosed(open) ~= -1 then
+    vim.cmd(open .. "foldopen")
+    if not visual then
+      vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(buf) and fence.output_at(buf, open) == open then
+          pcall(vim.cmd, open .. "foldclose")
+        end
+      end)
+    end
+  end
+  if visual then vim.cmd("normal! \27") end
+  vim.api.nvim_win_set_cursor(0, { a, 0 })
+  vim.cmd("normal! V")
+  vim.api.nvim_win_set_cursor(0, { b, 0 })
+end
+
+-- The `io`/`ao` mapping: select the span, or with none here cancel a pending
+-- operator (and leave a visual selection as it is).
+local function output_object(around)
+  return function()
+    if not output_span(around) then
+      return vim.fn.mode(1):sub(1, 2) == "no" and "<Esc>" or ""
+    end
+    return "<Cmd>lua require('bsh')._select_output(" .. tostring(around) .. ")<CR>"
+  end
+end
+
+-- Insert-mode <M-CR> on a one-line cell: run it, then open a fresh prompt with the
+-- same prefix (`% `, `user@host%% `, `>> `...) one blank line below its output and keep typing,
+-- REPL style. Anywhere else it's a plain newline.
+local function run_and_continue()
+  local buf = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local line = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
+  local m = vim.pesc(config.marker)
+  local prefix = line:match("^(%s*%S-" .. m .. m .. "?%s+)%S")
+      or line:match("^(%s*%[?[%w_%-]*%]?>+!?%s+)%S")
+  if not prefix or input_fence_at(buf, row - 1) then
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "ni", false)
+    return
+  end
+  if not execute_cell(false) then return end
+  local indent = line:match("^(%s*)")
+  local _, stop = fence_range(buf, row - 1, indent, "out") -- [start, stop), 0-indexed
+  vim.api.nvim_buf_set_lines(buf, stop, stop, false, { "", prefix }) -- a blank line between cells
+  vim.api.nvim_win_set_cursor(0, { stop + 2, #prefix })
+end
+
 -- If the cursor sits on a persistent-session cell, return its { lang, target }.
 -- Two cell shapes carry a session: a multiline input fence with the `$$` suffix
 -- (```python $$```, ```$$```) and the inline doubled marker (`%% cmd`,
@@ -540,6 +660,18 @@ function M.attach(buf)
       vim.cmd("normal! +")
     end
   end, { buffer = buf, desc = "bsh: run the agent cell ending the selection, selection attached" })
+
+  -- ]c / [c jump between cells; io / ao select a cell's output (yio, dao, vio).
+  vim.keymap.set({ "n", "x", "o" }, "]c", function() jump_cell(1) end,
+    { buffer = buf, desc = "bsh: next cell" })
+  vim.keymap.set({ "n", "x", "o" }, "[c", function() jump_cell(-1) end,
+    { buffer = buf, desc = "bsh: previous cell" })
+  vim.keymap.set({ "x", "o" }, "io", output_object(false),
+    { buffer = buf, expr = true, desc = "bsh: inner output (a result fence's body)" })
+  vim.keymap.set({ "x", "o" }, "ao", output_object(true),
+    { buffer = buf, expr = true, desc = "bsh: around output (the whole result fence)" })
+  vim.keymap.set("i", "<M-CR>", run_and_continue,
+    { buffer = buf, desc = "bsh: run this cell, then start the next one below it" })
 
   -- <C-c> cancels the running cell under the cursor (one-shot: stop; session:
   -- SIGINT the running command, keep the session). <C-k> ("kill") resets the

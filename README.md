@@ -55,6 +55,11 @@ A cell is a line (or a fenced block) that bsh knows how to run.
 Lines that aren't cells are just text: write notes between them. Output streams
 in live, and every result fence folds to a one-line summary (`za`).
 
+**The buffer is your history.** To run something again, scroll up (or `[c`),
+edit the cell and press `<CR>`: its old result is replaced in place. Output is
+ordinary text you can edit too, but a re-run overwrites it. Inline output stops
+after 2000 lines (`output_max_lines`); use `g<CR>` for anything bigger.
+
 ## Keys
 
 | Key | Action |
@@ -66,6 +71,9 @@ in live, and every result fence folds to a one-line summary (`za`).
 | `<localleader>r` | replay a session from the top down to the cursor, in a fresh interpreter |
 | `<localleader>t` | hide / show the agent's thinking lines |
 | visual `<CR>` | when the selection ends on a `>` cell, ask it with the selected lines attached |
+| insert `<M-CR>` | run the cell you're typing, then start the next one (same `%`, `user@host%%`, `>>` prefix) a blank line below its output |
+| `]c` / `[c` | jump to the next / previous cell |
+| `io` / `ao` | text objects for a cell's output (body / whole fence): `yio` copies it, even when folded; `dao` deletes it |
 
 Commands: `:Bsh[!]`, `:BshCancel`, `:BshReset[!]` (`!` = every session in the
 buffer), `:BshReplay`, `:BshThinking`, `:BshForget`. See `:h bsh` for details.
@@ -112,8 +120,9 @@ It uses [pi](https://pi.dev) when it's installed, otherwise the
   make it forget; `:BshForget` starts a new one. With `llm`, or with
   `agent_thread = "document"`, `>>` instead re-reads the cells above it, back to
   the nearest `>`, heading or `---`.
-- The agent is read-only by default (it can read and search files). End the
-  arrows with `!` (`>!`, `>>!`) to let it run commands and edit files.
+- The agent is read-only by default: it can read and search files itself, and
+  for anything else it suggests a command for you to run. End the arrows with
+  `!` (`>!`, `>>!`) to let it run commands and edit files.
 - Tool calls show up as `[tool] arg` lines and thinking as `| ` lines (hide them
   with `<localleader>t`).
 - `[model]> question` picks a model (pi) or template (llm).
@@ -177,6 +186,7 @@ require("bsh").setup({
   remote_login = true,      -- remote cells run in a login shell (loads profile/bashrc)
   transports = { docker = { "docker", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" } },
   python = "python3",
+  output_max_lines = 2000,  -- inline output cap (false = none); g<CR> has no cap
   agent = "auto",           -- "pi", "llm" or "auto" (pi if installed)
   agent_thread = "session", -- or "document": `>>` re-reads the cells above it
   agent_tools = "read,grep,find,ls",                         -- pi, for `>`
@@ -196,7 +206,8 @@ All options are documented in [`lua/bsh/config.lua`](lua/bsh/config.lua) and
 - No interactive programs: anything that needs a TTY (`vim`, `htop`, password
   prompts, `ssh` asking for a passphrase) won't work. Use key-based ssh auth.
 - Remote sessions can't be interrupted with `<C-c>`, only reset with `<C-k>`.
-- No shell history or tab completion, at least for now. The buffer is your history.
+- No shell history or tab completion, at least for now. The buffer is your
+  history (see [Cells](#cells)).
 
 ## Motive
 

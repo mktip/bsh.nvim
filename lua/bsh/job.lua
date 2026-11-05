@@ -113,6 +113,15 @@ end
 -- rather than plain text. Applied to the live preview and the final render alike.
 local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag, on_cell, decode)
   local acc, err_data = "", {}
+  -- inline plain output is capped (config.output_max_lines): past the cap, stdout
+  -- is only counted, so a runaway `yes` or a huge `cat` can't bloat the buffer
+  -- (or the re-split each chunk does). Agent output (decode) and side buffers
+  -- (sink) keep everything.
+  local max = not sink and not decode and config.output_max_lines or nil
+  if max and max <= 0 then max = nil end
+  -- once capped: newlines dropped so far, and whether a partial last line is pending
+  local capped, dropped_nl, partial = false, 0, false
+  local function dropped() return capped and dropped_nl + (partial and 1 or 0) or 0 end
   local n = 1 -- how many body lines we currently occupy (starts: the placeholder)
   -- replace our [row, row+n) body region with `lines`; returns the new n.
   local function inline_paint(lines)
@@ -131,14 +140,33 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
     local raw = decode and decode(acc) or acc
     local lines = vim.split(raw:gsub("\r", ""):gsub(".\b", ""), "\n", { plain = true })
     while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
-    return lines
+    return max and fence.cap(lines, dropped()) or lines
   end
   local job = vim.fn.jobstart(argv, {
     cwd = cwd,
     stderr_buffered = true,
     on_stdout = function(_, d)
       if not d then return end
+      if capped then -- already over the cap: just count
+        dropped_nl = dropped_nl + #d - 1
+        partial = #d == 1 and (partial or d[1] ~= "") or d[#d] ~= ""
+        return
+      end
       acc = acc .. table.concat(d, "\n")
+      if max then
+        local pos, seen = 0, 0 -- find the end of line `max`
+        while seen < max do
+          pos = acc:find("\n", pos + 1, true)
+          if not pos then break end
+          seen = seen + 1
+        end
+        if pos and pos < #acc then -- there is more past line `max`: drop it
+          local rest = acc:sub(pos + 1)
+          capped, dropped_nl = true, select(2, rest:gsub("\n", ""))
+          partial = rest:match("[^\n]*$") ~= ""
+          acc = acc:sub(1, pos)
+        end
+      end
       vim.schedule(function()
         local lines = split_out()
         if #lines == 0 then return end -- nothing complete yet; keep the placeholder

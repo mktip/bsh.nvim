@@ -58,6 +58,11 @@ The examples use the default run marker `%` (see |bsh-config|, `marker`).
 
 Results fold to a one-line summary (`+ out (12 lines)`); use |za| as usual.
 
+The buffer is the history: to run something again, edit the cell and press
+<CR>; its old result is replaced. Output is ordinary text and can be edited,
+but a re-run overwrites it. Inline output stops after `output_max_lines`
+lines, with a note counting the rest; g<CR> keeps everything.
+
 ==============================================================================
 3. KEYS AND COMMANDS                                                *bsh-keys*
 
@@ -72,6 +77,16 @@ g<CR>  <C-CR>       Run it with output sent to a side buffer (`bsh://out/...`).
                     keyboard protocol; g<CR> always works.
 {Visual}<CR>        When the selection ends on a `>` cell, ask it with the
                     other selected lines attached as context.
+i_<M-CR>            In insert mode on a one-line cell: run it, then start a
+                    new cell one blank line below its output, with the same
+                    prefix (`% `, `user@host%% `, `>> `...), and keep typing.
+                    Elsewhere it's a plain newline.
+]c  [c              Jump to the next / previous cell. Takes a count.
+                                                            *bsh-io* *bsh-ao*
+io  ao              Text objects: the output fence under the cursor, or below
+                    the trigger on the cursor line. `io` is its body, `ao` the
+                    whole fence. `yio` copies a cell's output (also when it's
+                    folded), `dao` deletes it.
 <C-c>                                                             *:BshCancel*
 :BshCancel          Cancel the running cell under the cursor. A one-shot is
                     stopped and marked `[cancelled]`; a session cell gets
@@ -129,7 +144,8 @@ CLI.
                     instead, back to the nearest `>`, heading or `---` line.
 `>! question`       Let the agent run commands and edit files (pi:
                     `agent_tools_write`; llm: `--td`). Without `!` it's
-                    read-only.
+                    read-only: it can read and search files, and proposes any
+                    other command in a code block for you to run.
 `[name]> question`  Use model `name` (pi) or template `name` (llm).
 
 ==============================================================================
@@ -170,6 +186,7 @@ marker              Run marker. Default `"%"`.
 remote_login        Run remote cells in a login shell. Default `true`.
 transports          Route schemes, see |bsh-routes|.
 python              Interpreter for python cells. Default `"python3"`.
+output_max_lines    Inline output cap, `false` for none. Default `2000`.
 agent               `"auto"`, `"pi"` or `"llm"`. Default `"auto"`.
 agent_thread        `"session"` or `"document"`, see |bsh-agent|.
 agent_tools         pi tools for `>`. Default `"read,grep,find,ls"`.

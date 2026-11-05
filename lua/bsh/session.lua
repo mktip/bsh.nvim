@@ -193,6 +193,7 @@ local function stream_partial(buf, s)
       item.sink(lines, false)
       return
     end
+    lines = fence.cap(lines)
     local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, item.mark, {})
     if not pos[1] then return end -- fence gone (re-run / cleared): stale
     local out = {}
@@ -240,6 +241,7 @@ local function sess_start(buf, lang, target)
         if item then
           item.done = true -- queued streaming paints for it become no-ops
           local lines = body_lines(body)
+          if not item.sink then lines = fence.cap(lines) end -- inline: keep the head
           if tonumber(rc) ~= 0 then lines[#lines + 1] = "[exit " .. rc .. "]" end
           if pwd ~= "" then -- shell told us where it is now -> refresh the cwd badge
             s.cwd = pwd

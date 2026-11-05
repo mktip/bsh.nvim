@@ -112,6 +112,55 @@ function M.fill_fence(buf, mark, indent, lines, n)
   end)
 end
 
+-- Inline output is capped at config.output_max_lines: keep the head, then one note
+-- saying how much was left out (`more` = lines already dropped upstream, if any).
+function M.cap_note(n)
+  return "[... " .. n .. " more line" .. (n == 1 and "" or "s") .. " not shown; g<CR> runs it into a side buffer]"
+end
+
+function M.cap(lines, more)
+  local max = require("bsh.config").output_max_lines
+  more = more or 0
+  if max and max > 0 and #lines > max then
+    more = more + #lines - max
+    for i = #lines, max + 1, -1 do lines[i] = nil end
+  end
+  if more > 0 then lines[#lines + 1] = M.cap_note(more) end
+  return lines
+end
+
+-- The owned result fence at 1-indexed `row`: the one the cursor is in (delimiters
+-- included), or the one right below a trigger line. Returns its 1-indexed
+-- open/close rows, or nil. Used by the `io` / `ao` text objects.
+local OWNED_OPEN = "^%s*```(%S+)%s*$"
+function M.output_at(buf, row)
+  local function gl(r) return vim.api.nvim_buf_get_lines(buf, r - 1, r, false)[1] or "" end
+  local total = vim.api.nvim_buf_line_count(buf)
+  local function closer(open)
+    for r = open + 1, total do
+      if gl(r):match("^%s*```%s*$") then return r end
+    end
+  end
+  local function owned(r)
+    local tag = gl(r):match(OWNED_OPEN)
+    return tag and OWNED_TAGS[tag]
+  end
+  if row < total and owned(row + 1) and not owned(row) then -- on the trigger
+    local c = closer(row + 1)
+    if c then return row + 1, c end
+  end
+  for r = row, 1, -1 do
+    local l = gl(r)
+    if owned(r) then
+      local c = closer(r)
+      if c and c >= row then return r, c end
+      return nil
+    end
+    if r < row and l:match("^%s*```%s*$") then return nil end -- below a closed fence
+    if r < row and l:match("^%s*```%S") then return nil end   -- inside some other fence
+  end
+end
+
 -- Folding: each fence (opening line through its closing ```) is its OWN fold;
 -- the trigger line and surrounding prose stay at level 0 and visible.
 -- We force a fold boundary at every fence so that ADJACENT fences with no blank
