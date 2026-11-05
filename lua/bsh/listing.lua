@@ -127,20 +127,14 @@ function run_goto(buf, trow, indent, target, query, flags)
   end
 end
 
--- Open a file entry: local via :edit; remote via netrw scp:// (best effort,
--- needs netrw enabled). `~/x` -> home-relative URL, `/x` -> // absolute URL.
+-- Open a file entry: local via :edit; at the end of a route (ssh, a container,
+-- both...) as a bsh:// buffer read and written over that route (bsh.remote).
 function M.open_entry(target, path)
   if target == "" then
     vim.cmd("edit " .. vim.fn.fnameescape(vim.fn.expand(path)))
     return
   end
-  -- netrw shells out to `scp` for scp:// reads; without this it echoes the
-  -- command and leaves a hit-ENTER prompt, so opening a remote file took two
-  -- <CR>s. Silent transfers skip that prompt -> one <CR>, like local files.
-  vim.g.netrw_silent = 1
-  local rel = path:match("^~/(.*)$")
-  local url = "scp://" .. target .. "/" .. (rel or path)
-  vim.cmd("edit " .. vim.fn.fnameescape(url))
+  require("bsh.remote").open(target, path)
 end
 
 -- If `row` sits on an entry line inside a navigable fence, return its opening

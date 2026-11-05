@@ -95,6 +95,10 @@ me@server/docker@api% ps aux     # ssh to server, then into its container
 me@server: /var/log              # list a remote directory
 ```
 
+`<CR>` on a file in a remote listing opens it as a `bsh://<route>:<path>`
+buffer, read and written (`:w`) over the same route. So you can edit a config
+file inside a container on another machine just like a local one.
+
 Only ssh is built in. Docker ships as an example transport; add your own as argv
 templates with `{addr}` and `{cmd}` holes:
 

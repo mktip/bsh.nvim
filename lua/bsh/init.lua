@@ -725,6 +725,8 @@ M.config = function()
     pattern = { "*.bsh.md", "*.bsh.markdown" },
     callback = function(args) M.attach(args.buf) end,
   })
+  -- files at the end of a route open as bsh://<route>:<path> buffers
+  require("bsh.remote").setup()
   -- tear a buffer's persistent `%%` shell down when the buffer is wiped.
   vim.api.nvim_create_autocmd("BufWipeout", {
     callback = function(args) M.stop_session(args.buf) end,

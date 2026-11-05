@@ -124,6 +124,12 @@ Transports are argv templates with `{addr}` and `{cmd}` holes, or a
       },
     })
 <
+                                                             *bsh-remote-files*
+<CR> on a file in a routed listing (`me@server/docker@api: /etc`) opens it as
+a `bsh://<route>:<path>` buffer. It is read with `cat` and written back on
+|:w| with `cat >`, both over the same route, so it works through any transport
+and any number of hops.
+
 Remote sessions can't be interrupted with <C-c> (it would only reach the local
 ssh client); reset them with <C-k> instead.
 
