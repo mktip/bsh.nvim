@@ -89,7 +89,7 @@ scheme you define, and hops chain with `/`:
 
 ```
 me@server% uname -a              # ssh
-docker@api% ps aux               # docker exec
+docker@api% ps aux               # docker exec (podman@api for podman)
 docker@api%% cd /srv             # a persistent shell inside the container
 me@server/docker@api% ps aux     # ssh to server, then into its container
 me@server: /var/log              # list a remote directory
@@ -99,13 +99,12 @@ me@server: /var/log              # list a remote directory
 buffer, read and written (`:w`) over the same route. So you can edit a config
 file inside a container on another machine just like a local one.
 
-Only ssh is built in. Docker ships as an example transport; add your own as argv
+ssh, `docker@` and `podman@` work out of the box. Add your own as argv
 templates with `{addr}` and `{cmd}` holes:
 
 ```lua
 require("bsh").setup({
   transports = {
-    podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
     jail   = { "jexec", "{addr}", "sh", "-lc", "{cmd}" },
     kube   = { "kubectl", "exec", "-i", "{addr}", "--", "sh", "-lc", "{cmd}" },
   },
@@ -209,7 +208,10 @@ Defaults shown; pass only what you want to change:
 require("bsh").setup({
   marker = "%",             -- the run marker; "$" if you prefer
   remote_login = true,      -- remote cells run in a login shell (loads profile/bashrc)
-  transports = { docker = { "docker", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" } },
+  transports = {            -- besides ssh; yours are merged in
+    docker = { "docker", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
+    podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
+  },
   python = "python3",
   output_max_lines = 2000,  -- inline output cap (false = none); g<CR> has no cap
   agent = "auto",           -- "pi", "llm" or "auto" (pi if installed)

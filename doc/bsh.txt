@@ -115,12 +115,13 @@ outermost first:
     me@server/docker@api% ps aux
 <
 Transports are argv templates with `{addr}` and `{cmd}` holes, or a
-`function(addr, inner) -> argv`. Docker is the only one defined by default:
+`function(addr, inner) -> argv`. `docker` and `podman` are defined by default
+(`docker exec -i` / `podman exec -i`). Add your own:
 >lua
     require("bsh").setup({
       transports = {
-        podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
         jail = { "jexec", "{addr}", "sh", "-lc", "{cmd}" },
+        kube = { "kubectl", "exec", "-i", "{addr}", "--", "sh", "-lc", "{cmd}" },
       },
     })
 <

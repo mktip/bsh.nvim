@@ -32,6 +32,11 @@ T["remote_login=false drops the login wrapper"] = function()
   eq(argv("web@prod", "ls"), { "ssh", "-T", "web@prod", "ls" })
 end
 
+T["a podman hop execs in the container (built in, like docker)"] = function()
+  H.bootstrap(child)
+  eq(argv("podman@api", "ls"), { "podman", "exec", "-i", "api", "sh", "-lc", "ls" })
+end
+
 T["a docker hop execs in the container"] = function()
   H.bootstrap(child)
   eq(argv("docker@api", "ls -1p"), { "docker", "exec", "-i", "api", "sh", "-lc", "ls -1p" })

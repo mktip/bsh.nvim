@@ -28,11 +28,11 @@ M.remote_login = true
 -- Or a function(addr, inner) -> argv for full control. The scheme name is the key.
 -- ssh is built in (and honours remote_login); add to / override this table freely.
 -- Examples to copy:  jail = { "jexec", "{addr}", "sh", "-lc", "{cmd}" }
---                    podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" }
 --                    kube = { "kubectl", "exec", "-i", "{addr}", "--", "sh", "-lc", "{cmd}" }
 --                    vm = { "ssh", "-T", "{addr}.vm.lan", "{cmd}" }   -- a bhyve/kvm guest
 M.transports = {
   docker = { "docker", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
+  podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
 }
 
 -- `> instruction` agent cells call `llm -t <template>`; the default `web`
