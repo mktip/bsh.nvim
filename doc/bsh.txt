@@ -77,10 +77,10 @@ g<CR>  <C-CR>       Run it with output sent to a side buffer (`bsh://out/...`).
                     keyboard protocol; g<CR> always works.
 {Visual}<CR>        When the selection ends on a `>` cell, ask it with the
                     other selected lines attached as context.
-i_<M-CR>            In insert mode on a one-line cell: run it, then start a
-                    new cell one blank line below its output, with the same
-                    prefix (`% `, `user@host%% `, `>> `...), and keep typing.
-                    Elsewhere it's a plain newline.
+<M-CR>  i_<M-CR>    (Alt+Enter) On a one-line cell, in normal or insert mode:
+                    run it, then start a new cell one blank line below its
+                    output, with the same prefix (`% `, `user@host%% `,
+                    `>> `...), in insert mode. Elsewhere it acts like <CR>.
 ]c  [c              Jump to the next / previous cell. Takes a count.
                                                             *bsh-io* *bsh-ao*
 io  ao              Text objects: the output fence under the cursor, or below

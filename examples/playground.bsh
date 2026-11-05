@@ -16,7 +16,7 @@ the ```out / ```dir blocks below a cell belong to bsh. `za` folds a result.
 
 % seq 100000
 
-## in insert mode, <M-CR> runs the cell and starts the next `% ` below it.
+## <M-CR> (Alt+Enter) runs the cell and starts typing the next `% ` below it.
 ## ]c / [c jump between cells; yio copies a cell's output, dao deletes it.
 
 ## <C-c> cancels a running cell

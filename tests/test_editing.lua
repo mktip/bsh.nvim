@@ -149,4 +149,25 @@ T["<M-CR> keeps a route + session prefix, and is a newline on prose"] = function
   eq(vim.list_slice(H.lines(child), 1, 2), { "some prose", "x" })
 end
 
+T["normal <M-CR> runs the cell and leaves you typing the next one"] = function()
+  H.bootstrap(child, { lines = { "%% echo hi" } })
+  child.lua([[
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<M-CR>pwd<Esc>', true, false, true), 'x', false)
+  ]])
+  wait_done()
+  eq(H.lines(child), { "%% echo hi", "```out", "hi", "```", "", "%% pwd" })
+end
+
+T["normal <M-CR> on a multiline fence just runs it"] = function()
+  H.bootstrap(child, { lines = { "```%", "echo hi", "```" } })
+  child.lua([[
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<M-CR>', true, false, true), 'x', false)
+  ]])
+  wait_done()
+  eq(H.lines(child), { "```%", "echo hi", "```", "```out", "hi", "```" })
+  eq(child.lua_get("vim.fn.mode()"), "n")
+end
+
 return T

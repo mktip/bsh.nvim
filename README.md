@@ -71,7 +71,7 @@ after 2000 lines (`output_max_lines`); use `g<CR>` for anything bigger.
 | `<localleader>r` | replay a session from the top down to the cursor, in a fresh interpreter |
 | `<localleader>t` | hide / show the agent's thinking lines |
 | visual `<CR>` | when the selection ends on a `>` cell, ask it with the selected lines attached |
-| insert `<M-CR>` | run the cell you're typing, then start the next one (same `%`, `user@host%%`, `>>` prefix) a blank line below its output |
+| `<M-CR>` (Alt+Enter) | run the cell, then start the next one (same `%`, `user@host%%`, `>>` prefix) a blank line below its output |
 | `]c` / `[c` | jump to the next / previous cell |
 | `io` / `ao` | text objects for a cell's output (body / whole fence): `yio` copies it, even when folded; `dao` deletes it |
 

@@ -435,10 +435,11 @@ local function output_object(around)
   end
 end
 
--- Insert-mode <M-CR> on a one-line cell: run it, then open a fresh prompt with the
--- same prefix (`% `, `user@host%% `, `>> `...) one blank line below its output and keep typing,
--- REPL style. Anywhere else it's a plain newline.
-local function run_and_continue()
+-- <M-CR> on a one-line cell: run it, then open a fresh prompt with the same prefix
+-- (`% `, `user@host%% `, `>> `...) one blank line below its output, in insert mode,
+-- REPL style. Anywhere else it's what <CR> would be: a newline in insert mode, or
+-- a plain run / cursor-down in normal mode.
+local function run_and_continue(insert)
   local buf = vim.api.nvim_get_current_buf()
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local line = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
@@ -446,7 +447,11 @@ local function run_and_continue()
   local prefix = line:match("^(%s*%S-" .. m .. m .. "?%s+)%S")
       or line:match("^(%s*%[?[%w_%-]*%]?>+!?%s+)%S")
   if not prefix or input_fence_at(buf, row - 1) then
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "ni", false)
+    if insert then
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "ni", false)
+    elseif not execute_cell(false) then
+      vim.cmd("normal! +")
+    end
     return
   end
   if not execute_cell(false) then return end
@@ -454,6 +459,7 @@ local function run_and_continue()
   local _, stop = fence_range(buf, row - 1, indent, "out") -- [start, stop), 0-indexed
   vim.api.nvim_buf_set_lines(buf, stop, stop, false, { "", prefix }) -- a blank line between cells
   vim.api.nvim_win_set_cursor(0, { stop + 2, #prefix })
+  if not insert then vim.cmd("startinsert!") end
 end
 
 -- If the cursor sits on a persistent-session cell, return its { lang, target }.
@@ -670,7 +676,9 @@ function M.attach(buf)
     { buffer = buf, expr = true, desc = "bsh: inner output (a result fence's body)" })
   vim.keymap.set({ "x", "o" }, "ao", output_object(true),
     { buffer = buf, expr = true, desc = "bsh: around output (the whole result fence)" })
-  vim.keymap.set("i", "<M-CR>", run_and_continue,
+  vim.keymap.set("i", "<M-CR>", function() run_and_continue(true) end,
+    { buffer = buf, desc = "bsh: run this cell, then start the next one below it" })
+  vim.keymap.set("n", "<M-CR>", function() run_and_continue(false) end,
     { buffer = buf, desc = "bsh: run this cell, then start the next one below it" })
 
   -- <C-c> cancels the running cell under the cursor (one-shot: stop; session:
