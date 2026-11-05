@@ -28,6 +28,7 @@ local promptns = vim.api.nvim_create_namespace("bsh_prompt")
 -- redirects inside a cell (`cmd < file`, pipes, heredocs) work as in any shell.
 local DRIVER_SH = [[
 exec 3<&0 </dev/null 2>&1
+printf '__BSH_@TOKEN@__:pid:%d\n' "$$"
 while :; do
   __c=
   while :; do
@@ -65,9 +66,10 @@ end
 -- (length-framing makes multiline/indentation a non-issue), printing the sentinel
 -- itself; stderr is aliased to stdout for order.
 local DRIVER_PY = [[
-import sys, traceback
+import os, sys, traceback
 _in = sys.stdin.buffer
 sys.stderr = sys.stdout              # keep tracebacks/prints in stream order
+sys.stdout.write("__BSH_@TOKEN@__:pid:%d\n" % os.getpid()); sys.stdout.flush()
 G = {"__name__": "__main__"}
 while True:
     h = _in.readline()
@@ -229,6 +231,15 @@ local function sess_start(buf, lang, target)
     on_stdout = function(_, data)
       if not data then return end
       s.acc = s.acc .. table.concat(data, "\n")
+      -- the driver's first line: its pid ON THE FAR SIDE, for interrupts (it
+      -- shares the sentinel's prefix, so a half-arrived one is held, not painted)
+      if not s.pid then
+        local a, b, pid = s.acc:find("__BSH_" .. s.token .. "__:pid:(%d+)\r?\n")
+        if a then
+          s.pid = tonumber(pid)
+          s.acc = s.acc:sub(1, a - 1) .. s.acc:sub(b + 1)
+        end
+      end
       while true do
         -- sentinel: `__BSH_<token>__:<rc>[:<pwd>]`. The pwd field is sh-only (the
         -- `:?` makes it optional so the python driver's `:<rc>` sentinel matches too).
@@ -304,33 +315,28 @@ function M.run_session(buf, lang, target, trow, indent, cmd, to_buf, prow)
   sess_pump(buf, key)
 end
 
--- Send SIGINT to the right process for a session's CURRENTLY RUNNING unit, the
--- Ctrl-C equivalent that interrupts the command while keeping the session (env,
--- cwd, Python globals) alive:
---   python : signal the interpreter itself. Our driver execs each cell inside a
---            `try/except BaseException`, so KeyboardInterrupt is caught, printed,
---            and the read loop continues with the globals dict intact -- an
---            infinite-loop cell is interruptible without losing state.
---   sh     : signal the shell's foreground CHILD(ren) (`pgrep -P`), not the shell:
---            a non-interactive shell has no job control, so SIGINT must hit the
---            child directly. The shell then runs its sentinel printf (rc 130) and
---            keeps reading stdin. (A pure shell-builtin loop with no child can't be
---            interrupted this way -- reset the session instead.)
+-- SIGINT the command running in session `s`, wherever the session lives. The
+-- driver reported its own pid on the far side (s.pid), so the signal is sent by a
+-- second exec over the SAME route -- `kill` runs next to the session, whether
+-- that's here, over ssh, in a container, or in a container on an ssh host.
+--   sh:     the driver shell's children (the running command; a pipeline is
+--           several), or the shell itself when it has none. The driver
+--           survives: it just sees the command exit 130.
+--   python: the interpreter; the driver catches KeyboardInterrupt and goes on.
+-- (A pure shell-builtin loop with no child can't be interrupted this way --
+-- reset the session instead.)
 local function interrupt_proc(s)
-  local ok, pid = pcall(vim.fn.jobpid, s.job)
-  if not ok or not pid or pid <= 0 then return end
-  local function sigint(p) vim.fn.system({ "kill", "-INT", tostring(p) }) end
-  if s.lang ~= "sh" then
-    sigint(pid); return
-  end
-  local kids = vim.fn.systemlist({ "pgrep", "-P", tostring(pid) })
-  if vim.v.shell_error == 0 and #kids > 0 then
-    for _, k in ipairs(kids) do
-      local n = tonumber(k); if n then sigint(n) end
-    end
+  local pid = s.pid
+  if not pid then return false end -- driver hasn't started yet
+  local cmd
+  if s.lang == "sh" then
+    cmd = ("k=$(pgrep -P %d 2>/dev/null || ps -A -o pid= -o ppid= 2>/dev/null"
+      .. " | awk '$2 == %d { print $1 }'); kill -INT ${k:-%d}"):format(pid, pid, pid)
   else
-    sigint(pid)
+    cmd = ("kill -INT %d"):format(pid)
   end
+  vim.system(job.build_argv(s.target, cmd), { text = true })
+  return true
 end
 
 -- Interrupt (SIGINT) the running command in this buffer's `lang`@`target` session.
@@ -338,18 +344,11 @@ end
 -- waiting on stdin would escape its read loop and kill it). Returns true if a
 -- signal was sent. The session keeps running; its sentinel arrives normally, so
 -- the cell fills with whatever it produced plus the interrupt's exit note.
---
--- REMOTE sessions (`target ~= ""`) are deliberately skipped: the process we can
--- signal locally is the ssh client, not the interpreter on the far side, so a
--- SIGINT would tear the whole session down instead of interrupting one command.
--- Returns false so the caller can steer the user to `:BshReset` (a fresh remote
--- interpreter) -- the only clean recovery until we forward signals over the hop.
 function M.interrupt_session(buf, lang, target)
-  if target ~= "" then return false end
   local s = sessions[buf] and sessions[buf][skey(lang, target)]
   if not (s and s.busy) then return false end
-  pcall(interrupt_proc, s)
-  return true
+  local ok, sent = pcall(interrupt_proc, s)
+  return ok and sent
 end
 
 -- RESET a session: kill its process and forget it, so the next `%%`/`%%` (or

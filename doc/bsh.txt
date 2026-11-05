@@ -130,8 +130,8 @@ a `bsh://<route>:<path>` buffer. It is read with `cat` and written back on
 |:w| with `cat >`, both over the same route, so it works through any transport
 and any number of hops.
 
-Remote sessions can't be interrupted with <C-c> (it would only reach the local
-ssh client); reset them with <C-k> instead.
+<C-c> works on sessions anywhere on a route: the signal is sent by a second
+exec over the same route, next to the session.
 
 ==============================================================================
 5. AGENT CELLS                                                     *bsh-agent*

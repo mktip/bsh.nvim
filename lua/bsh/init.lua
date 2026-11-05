@@ -532,13 +532,6 @@ local function cancel_here()
     vim.notify("bsh: interrupted " .. session_label(c) .. " session (SIGINT)")
     return
   end
-  -- a remote session under the cursor: SIGINT can't reach the far interpreter
-  -- (only the local ssh client), so steer to reset rather than silently no-op.
-  if c and c.target ~= "" then
-    vim.notify("bsh: can't interrupt a remote session — :BshReset to restart it",
-      vim.log.levels.WARN)
-    return
-  end
   local busy = {}
   for _, s in ipairs(session.list_sessions(buf)) do if s.busy then busy[#busy + 1] = s end end
   if #busy == 1 and session.interrupt_session(buf, busy[1].lang, busy[1].target) then

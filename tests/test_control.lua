@@ -20,6 +20,16 @@ end
 
 -- inflight/sessions are keyed by the real bufnr (what the dispatcher passes), so
 -- the specs call the engine with the actual buffer, mirroring production.
+-- wait (up to 3s) until some buffer line contains `text`
+local function wait_for(text)
+  child.lua([[local t = ...
+    vim.wait(3000, function()
+      for _, l in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+        if l:find(t, 1, true) then return true end
+      end
+    end, 20)]], { text })
+end
+
 local function bufeval(c, expr)
   return c.lua_get("(function() local b = vim.api.nvim_get_current_buf(); return " .. expr .. " end)()")
 end
@@ -51,14 +61,31 @@ T["reset_session is a no-op (false) when there is no session"] = function()
   eq(bufeval(child, "require('bsh.session').reset_session(b, 'sh', '')"), false)
 end
 
-T["interrupt is refused on a remote session (reset is the recovery)"] = function()
-  H.bootstrap(child, { name = "rr.bsh", lines = { "```python loc@x%%", "z = 1", "```" } })
-  child.lua("require('bsh').transports.loc = { 'sh', '-lc', '{cmd}' }")
-  H.run(child, H.rowof(child, "^z = 1$"))
-  -- SIGINT can't reach the far interpreter (only the local ssh/transport client),
-  -- so a remote session always refuses interrupt -- but reset restarts it cleanly.
-  eq(bufeval(child, "require('bsh.session').interrupt_session(b, 'python', 'loc@x')"), false)
-  eq(bufeval(child, "require('bsh.session').reset_session(b, 'python', 'loc@x')"), true)
+T["<C-c> interrupts a session at the end of a nested route, which survives"] = function()
+  H.bootstrap(child, { name = "rr.bsh", lines = { "loc@a/loc@b%% X=kept", "", "loc@a/loc@b%% sleep 20", "", "loc@a/loc@b%% echo $X" } })
+  child.lua("require('bsh').transports.loc = { 'sh', '-c', '{cmd}' }")
+  H.run(child, 1)
+  start(H.rowof(child, "sleep 20"))
+  eq(bufeval(child, "require('bsh.session').interrupt_session(b, 'sh', 'loc@a/loc@b')"), true)
+  wait_for("[exit 130]")
+  eq(H.rowof(child, "%[exit 130%]") ~= nil, true) -- the command died, not the session
+  H.run(child, H.rowof(child, "echo %$X"))
+  eq(H.rowof(child, "^kept$") ~= nil, true)
+end
+
+T["<C-c> interrupts a routed python session; its globals survive"] = function()
+  H.bootstrap(child, { name = "rp.bsh", lines = {
+    "```python loc@x%%", "z = 41", "```", "",
+    "```python loc@x%%", "import time; time.sleep(20)", "```", "",
+    "```python loc@x%%", "print(z + 1)", "```" } })
+  child.lua("require('bsh').transports.loc = { 'sh', '-c', '{cmd}' }")
+  H.run(child, 2)
+  start(H.rowof(child, "time.sleep"))
+  eq(bufeval(child, "require('bsh.session').interrupt_session(b, 'python', 'loc@x')"), true)
+  wait_for("KeyboardInterrupt")
+  eq(H.rowof(child, "KeyboardInterrupt") ~= nil, true)
+  H.run(child, H.rowof(child, "print%(z %+ 1%)"))
+  eq(H.rowof(child, "^42$") ~= nil, true)
 end
 
 T["interrupt_session is false when idle, list/reset_all track sessions"] = function()

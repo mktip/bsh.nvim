@@ -230,7 +230,6 @@ All options are documented in [`lua/bsh/config.lua`](lua/bsh/config.lua) and
 
 - No interactive programs: anything that needs a TTY (`vim`, `htop`, password
   prompts, `ssh` asking for a passphrase) won't work. Use key-based ssh auth.
-- Remote sessions can't be interrupted with `<C-c>`, only reset with `<C-k>`.
 - No shell history or tab completion, at least for now. The buffer is your
   history (see [Cells](#cells)).
 
