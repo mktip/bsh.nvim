@@ -125,6 +125,18 @@ Transports are argv templates with `{addr}` and `{cmd}` holes, or a
       },
     })
 <
+                                                                  *bsh-routes-alias*
+`routes` names routes. Each `/` segment that is an alias expands, so aliases
+work alone, at the start of a chain, and through each other:
+>lua
+    require("bsh").setup({ routes = { box = "me@server", api = "box/podman@api" } })
+<
+`api%% ps`, `box/docker@db% ls` and `api: /etc` then work. An alias wins over
+an ssh host of the same name.
+
+Each remote `%` opens a new ssh connection. ssh's `ControlMaster auto` and
+`ControlPersist` (in ~/.ssh/config) reuse one, which makes remote cells fast.
+
                                                              *bsh-remote-files*
 <CR> on a file in a routed listing (`me@server/docker@api: /etc`) opens it as
 a `bsh://<route>:<path>` buffer. It is read with `cat` and written back on
@@ -198,6 +210,7 @@ rules               Your own cell kinds, tried before the built-in ones,
                     `false` to pass the line on, or nothing once handled.
 remote_login        Run remote cells in a login shell. Default `true`.
 transports          Route schemes, see |bsh-routes|.
+routes              Route aliases, see |bsh-routes-alias|.
 python              Interpreter for python cells. Default `"python3"`.
 output_max_lines    Inline output cap, `false` for none. Default `2000`.
 agent               `"auto"`, `"pi"` or `"llm"`. Default `"auto"`.

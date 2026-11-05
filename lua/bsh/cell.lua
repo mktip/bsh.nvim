@@ -45,11 +45,12 @@ local function agent(line)
     stateful = #arrows >= 2, bang = bang == "!", body = body }
 end
 
--- The colon must be the first non-blank char (local) or follow a route with an
--- `@` in it, so prose like "TODO: fix" isn't a listing.
+-- The colon must be the first non-blank char (local) or follow a route: one with
+-- an `@` in it, or a route alias. So prose like "TODO: fix" isn't a listing.
 local function list(line)
   local prefix, indent, target, body = line:match("^((%s*)(%S-):%s+)(%S.-)%s*$")
-  if body and (target == "" or target:find("@")) then
+  if body and (target == "" or target:find("@")
+        or (config.routes or {})[(target:match("^[^/]+"))]) then
     return { prefix = prefix, indent = indent, target = target, body = body }
   end
 end

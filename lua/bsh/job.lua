@@ -78,9 +78,25 @@ end
 -- outermost, so fold from the RIGHT: the rightmost (innermost) hop runs `cmd`;
 -- each hop's argv becomes a shell-quoted command string fed as the next hop OUT's
 -- `{cmd}`; the leftmost (outermost) hop yields the final argv.
+-- Expand route aliases (config.routes): each `/` segment naming an alias is
+-- replaced by its route, recursively (an alias may use other aliases).
+local function expand_route(target, depth)
+  depth = depth or 0
+  local out = {}
+  for _, seg in ipairs(vim.split(target, "/", { plain = true })) do
+    local r = (config.routes or {})[seg]
+    if r and depth < 10 then -- (10: an alias loop stops expanding, it doesn't hang)
+      out[#out + 1] = expand_route(r, depth + 1)
+    else
+      out[#out + 1] = seg
+    end
+  end
+  return table.concat(out, "/")
+end
+
 local function build_argv(target, cmd)
   if target == "" then return { vim.o.shell, vim.o.shellcmdflag, cmd } end
-  local segs = vim.split(target, "/", { plain = true })
+  local segs = vim.split(expand_route(target), "/", { plain = true })
   local inner = cmd
   for i = #segs, 1, -1 do
     local tmpl, addr = resolve_hop(segs[i])
@@ -422,6 +438,7 @@ function M.cancel_at(buf, row)
 end
 
 M.build_argv = build_argv
+M.expand_route = expand_route
 M.run_job = run_job
 M.shell_transform = shell_transform
 M.doc_cwd = doc_cwd

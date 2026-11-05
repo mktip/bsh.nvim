@@ -119,4 +119,27 @@ T["ssh: menu of hosts with their users, drilling one emits a session cell"] = fu
   eq(H.lines(child), { "beta%% " })
 end
 
+T["containers: menu of running containers, drilling one emits a session cell"] = function()
+  -- stub runtimes: podman has `web`, docker (a shim) lists `web` again plus `db`
+  local bin = vim.fn.tempname()
+  vim.fn.mkdir(bin, "p")
+  vim.fn.writefile({ "#!/bin/sh", [[printf 'web\talpine:3.20\tUp 2 minutes\n']] }, bin .. "/podman")
+  vim.fn.writefile({ "#!/bin/sh", [[printf 'web\talpine:3.20\tUp 2 minutes\ndb\tpostgres:16\tUp 1 hour\n']] }, bin .. "/docker")
+  vim.fn.setfperm(bin .. "/podman", "rwxr-xr-x")
+  vim.fn.setfperm(bin .. "/docker", "rwxr-xr-x")
+  H.bootstrap(child, { lines = { "containers" } })
+  child.lua("vim.env.PATH = ... .. ':' .. vim.env.PATH", { bin })
+  H.run(child, 1)
+  eq(H.lines(child), { "containers", "```menu",
+    "podman@web  alpine:3.20  Up 2 minutes", "docker@db   postgres:16  Up 1 hour", "```" })
+  H.run(child, H.rowof(child, "^docker@db"))
+  eq(H.lines(child), { "docker@db%% " })
+end
+
+T["containers on a host: the emitted cell routes through it"] = function()
+  H.bootstrap(child, { lines = { "containers me@server 'podman@web  alpine  Up'" } })
+  H.run(child, 1)
+  eq(H.lines(child), { "me@server/podman@web%% " })
+end
+
 return T

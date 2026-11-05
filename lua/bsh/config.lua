@@ -30,6 +30,12 @@ M.remote_login = true
 -- Examples to copy:  jail = { "jexec", "{addr}", "sh", "-lc", "{cmd}" }
 --                    kube = { "kubectl", "exec", "-i", "{addr}", "--", "sh", "-lc", "{cmd}" }
 --                    vm = { "ssh", "-T", "{addr}.vm.lan", "{cmd}" }   -- a bhyve/kvm guest
+-- Route aliases: a name standing for a route (or the start of one). Any `/`
+-- segment that is an alias expands, so `api%% ps` and `box/podman@db% ls` work:
+--   routes = { box = "me@server", api = "me@server/podman@api" }
+-- An alias wins over an ssh host of the same name.
+M.routes = {}
+
 M.transports = {
   docker = { "docker", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
   podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },

@@ -32,6 +32,24 @@ T["remote_login=false drops the login wrapper"] = function()
   eq(argv("web@prod", "ls"), { "ssh", "-T", "web@prod", "ls" })
 end
 
+T["route aliases expand, alone, inside a chain, and through each other"] = function()
+  H.bootstrap(child)
+  child.lua([[require('bsh').setup({ routes = { box = "me@server", api = "box/podman@api" } })]])
+  eq(argv("api", "ls"), argv("me@server/podman@api", "ls"))
+  eq(argv("box/docker@db", "ls"), argv("me@server/docker@db", "ls"))
+  eq(argv("other", "ls")[3], "other") -- not an alias: still a plain ssh host
+  child.lua([[require('bsh').setup({ routes = { a = "b", b = "a" } })]])
+  eq(type(argv("a", "ls")), "table") -- a loop stops expanding instead of hanging
+end
+
+T["a route alias works in a listing trigger too"] = function()
+  H.bootstrap(child)
+  child.lua([[require('bsh').setup({ routes = { box = "me@server" } })]])
+  eq(child.lua_get("require('bsh.cell').parse('box: /etc').kind"), "list")
+  eq(child.lua_get("require('bsh.cell').parse('box/podman@x: /etc').target"), "box/podman@x")
+  eq(child.lua_get("require('bsh.cell').parse('notes: /etc') == nil"), true)
+end
+
 T["a podman hop execs in the container (built in, like docker)"] = function()
   H.bootstrap(child)
   eq(argv("podman@api", "ls"), { "podman", "exec", "-i", "api", "sh", "-lc", "ls" })

@@ -95,6 +95,25 @@ me@server/docker@api% ps aux     # ssh to server, then into its container
 me@server: /var/log              # list a remote directory
 ```
 
+Long routes get an alias:
+
+```lua
+require("bsh").setup({ routes = { box = "me@server", api = "box/podman@api" } })
+```
+
+Then `api%% ps` runs in that container, and `box/docker@db% ls` works too.
+
+**Make remote cells fast.** Each `%` opens a new ssh connection. Let ssh reuse
+one, and remote cells feel local:
+
+```
+# ~/.ssh/config
+Host *
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%r@%h:%p
+  ControlPersist 10m
+```
+
 `<CR>` on a file in a remote listing opens it as a `bsh://<route>:<path>`
 buffer, read and written (`:w`) over the same route. So you can edit a config
 file inside a container on another machine just like a local one.
@@ -151,8 +170,10 @@ A command can talk back to bsh through its exit code:
 - **exit 151**: its first line is a **new cell** that replaces the trigger, e.g.
   a container picker that hands you a `docker@<id>%% ` shell.
 
-[`examples/bsh-home`](examples/bsh-home) has small examples of each, plus an
-`ssh` picker that lists the hosts from your ssh config and history. Try them with
+[`examples/bsh-home`](examples/bsh-home) has small examples of each, plus two
+pickers: `ssh` lists the hosts from your ssh config and history, and
+`containers` lists running podman/docker containers, here or on a host
+(`containers me@server`). `<CR>` on an entry gives you a `%%` session cell in it. Try them with
 `export BSH_HOME=/path/to/bsh.nvim/examples/bsh-home`.
 
 `bin/bsh` resolves the same names from any shell (`bsh git.undo`), running in
@@ -212,6 +233,7 @@ require("bsh").setup({
     docker = { "docker", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
     podman = { "podman", "exec", "-i", "{addr}", "sh", "-lc", "{cmd}" },
   },
+  routes = {},              -- route aliases: { box = "me@server", api = "box/podman@api" }
   python = "python3",
   output_max_lines = 2000,  -- inline output cap (false = none); g<CR> has no cap
   agent = "auto",           -- "pi", "llm" or "auto" (pi if installed)
