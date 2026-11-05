@@ -224,9 +224,14 @@ local function sess_start(buf, lang, target)
     acc = "",
     busy = false,
     queue = {},
+    err = {},
     token = string.format("%08x", math.random(0, 0xffffffff))
   }
-  local jb = vim.fn.jobstart(spec.argv(s.token, target), {
+  local argv = spec.argv(s.token, target)
+  if vim.fn.executable(argv[1]) ~= 1 then
+    return nil, "`" .. argv[1] .. "` not found"
+  end
+  local jb = vim.fn.jobstart(argv, {
     cwd = doc_cwd(buf),
     on_stdout = function(_, data)
       if not data then return end
@@ -273,7 +278,38 @@ local function sess_start(buf, lang, target)
       end
       stream_partial(buf, s) -- no sentinel yet for the running cell: paint what we have
     end,
-    on_exit = function() if sessions[buf] then sessions[buf][key] = nil end end,
+    -- the driver's own stderr (it routes the cells' stderr to stdout): what the
+    -- user needs to see when the session can't start, e.g. `python3: not found`
+    on_stderr = function(_, data)
+      for _, l in ipairs(data or {}) do
+        if l ~= "" then s.err[#s.err + 1] = l end
+      end
+    end,
+    -- The process died on its own (it never started, `exit` in a cell, the
+    -- container stopped...). Finalize what was waiting on it so no cell is left
+    -- on `...running`. A reset has already forgotten this session and done that.
+    on_exit = function(_, code)
+      if not (sessions[buf] and sessions[buf][key] == s) then return end
+      sessions[buf][key] = nil
+      local pending = {}
+      if s.current then pending[1] = s.current end
+      vim.list_extend(pending, s.queue)
+      vim.schedule(function()
+        for i, it in ipairs(pending) do
+          local lines = i == 1 and s.current and body_lines(s.acc) or {}
+          if i == 1 then vim.list_extend(lines, s.err) end
+          lines[#lines + 1] = "[session exited " .. code .. "]"
+          it.done = true
+          if it.sink then
+            it.sink(lines, true, code)
+            pcall(vim.api.nvim_buf_del_extmark, buf, ns, it.mark)
+            if inflight[buf] then inflight[buf][it.mark] = nil end
+          elseif it.mark then
+            fill_fence(buf, it.mark, it.indent, lines, function() return it.n end)
+          end
+        end
+      end)
+    end,
   })
   if jb <= 0 then return nil end
   s.job = jb
@@ -296,8 +332,10 @@ end
 function M.run_session(buf, lang, target, trow, indent, cmd, to_buf, prow)
   local key = skey(lang, target)
   if not (sessions[buf] and sessions[buf][key]) then
-    if not sess_start(buf, lang, target) then
-      vim.notify("bsh: could not start " .. lang .. " session", vim.log.levels.ERROR)
+    local ok, why = sess_start(buf, lang, target)
+    if not ok then -- say so in the cell, where the user is looking
+      local mark = stage_fence(buf, trow, indent, "out", "...")
+      fill_fence(buf, mark, indent, { "[can't start a " .. lang .. " session: " .. (why or "jobstart failed") .. "]" })
       return
     end
   end

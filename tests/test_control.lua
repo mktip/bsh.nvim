@@ -98,4 +98,17 @@ T["interrupt_session is false when idle, list/reset_all track sessions"] = funct
   eq(bufeval(child, "#require('bsh.session').list_sessions(b)"), 0)
 end
 
+T["a session that can't start, or exits, says so instead of running forever"] = function()
+  H.bootstrap(child, { name = "dead.bsh", lines = {
+    "```python %%", "print(1)", "```", "", "%% exit 7", "", "%% echo after" } })
+  child.lua("require('bsh').python = 'no-such-python-xyz'")
+  H.run(child, 2)
+  eq(H.rowof(child, "running") == nil, true)
+  eq(H.rowof(child, "^%[can't start a python session: `no%-such%-python%-xyz` not found%]$") ~= nil, true)
+  H.run(child, H.rowof(child, "exit 7"))
+  eq(H.rowof(child, "%[session exited 7%]") ~= nil, true)
+  H.run(child, H.rowof(child, "echo after")) -- the next %% starts a fresh shell
+  eq(H.rowof(child, "^after$") ~= nil, true)
+end
+
 return T
