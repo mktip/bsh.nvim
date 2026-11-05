@@ -156,6 +156,27 @@ A command can talk back to bsh through its exit code:
 *your* current directory. Put it on your `PATH` to use your commands in `%%`
 sessions, a normal terminal or over ssh.
 
+## Your own cell kinds
+
+Every line is matched against an ordered list of rules, first match wins (think
+Plan 9's plumber). You can put your own in front of the built-in ones. A rule is
+a Lua pattern plus a function that gets its captures. Return a shell command to
+run it like a `%` cell, or handle the line yourself:
+
+```lua
+require("bsh").setup({
+  rules = {
+    -- `PROJ-123` on its own line opens the ticket
+    { match = "^%s*(%u+%-%d+)%s*$", run = function(_, id)
+        vim.ui.open("https://jira.example.com/browse/" .. id) end },
+    -- `man ls` shows the page, output inline
+    { match = "^man (%S+)$", run = function(_, page) return "man " .. page .. " | col -b" end },
+  },
+})
+```
+
+Return `false` to let the line fall through to the built-in rules.
+
 ## Install
 
 Requires **Neovim 0.10+** and a POSIX shell. Everything else is optional:

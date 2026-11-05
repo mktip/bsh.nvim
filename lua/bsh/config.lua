@@ -40,6 +40,15 @@ M.transports = {
 -- Point this at a more agentic template if you make one.
 M.agent_template = "web"
 
+-- Your own cell kinds, tried before the built-in ones (first match wins), like
+-- Plan 9 plumbing rules: { match = <lua pattern>, run = function(ctx, ...) }.
+-- `run` gets the pattern's captures; it may return a shell command (run as a `%`
+-- cell, output below the line), false to let the line fall through, or nothing
+-- once it has handled the line itself. ctx = { buf, row, line, indent, to_buf }.
+--   rules = { { match = "^%s*(%u+%-%d+)%s*$", run = function(_, id)
+--     vim.ui.open("https://jira.example.com/browse/" .. id) end } }
+M.rules = {}
+
 -- Inline output stops after this many lines (the rest is counted, not shown; g<CR>
 -- sends everything to a side buffer instead). false = no cap.
 M.output_max_lines = 2000
@@ -82,7 +91,7 @@ M.agent_thinking = false
 -- whatever you delete). llm always uses "document".
 M.agent_thread = "session"
 
--- interpreter used for `python` cells (one-shot `python $` and session `python $$`).
+-- interpreter used for `python` cells (one-shot `python %` and session `python %%`).
 M.python = "python3"
 
 -- Optional otter.nvim integration: real LSP (completion, hover, go-to-def,
@@ -114,9 +123,9 @@ M.menu_exit = 150
 -- Exit code a namespace command returns to EMIT A CELL: its first output line is
 -- treated as cell text that REPLACES the trigger (the dotted/breadcrumb line) and
 -- its result fence -- so a command can hand back a new, ready-to-run cell instead
--- of output. The keystone of "pick X -> get a `docker@<id>$$` session cell": a
+-- of output. The keystone of "pick X -> get a `docker@<id>%%` session cell": a
 -- menu drill (exit 150) narrows to a target, then a terminal action exits this
--- code printing e.g. `docker@<id>$$ ` and bsh swaps the breadcrumb for that cell.
+-- code printing e.g. `docker@<id>%% ` and bsh swaps the breadcrumb for that cell.
 M.cell_exit = 151
 
 -- Whether a finished SESSION (`<marker><marker>`) shell cell trails its prompt

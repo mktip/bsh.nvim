@@ -3,7 +3,8 @@
 #   ssh          -> menu of hosts you've used or configured (exit 150, drillable)
 #   ssh <line>   -> emits `<target>%% ` (exit 151): a persistent-session cell
 # Each menu line is `<target>  <user>@<hostname>[:port]  <source>`; the first word is
-# what the session cell connects to. Sources, in order:
+# what the session cell connects to: a config alias, else an explicit user@host.
+# Sources, in order:
 #   config   `Host` aliases in ~/.ssh/config (+ Includes); user/hostname resolved by
 #            `ssh -G`, so `User`, `HostName` and `Host *` defaults are all honoured
 #   history  `ssh [user@]host` typed in your bash/zsh/fish history (this is where
@@ -74,6 +75,11 @@ list() {
       [ "$src" != known ] || [ -z "${hosts[$h]}" ] || return
     fi
     seen[$key]=1; hosts[$h]=1
+    # the cell gets a config alias as is (it carries User/Port/ProxyJump...);
+    # anything else gets an explicit user@host, so the cell says who connects
+    # and still works in a copy of the file on another machine. (A non-22 port
+    # has no route syntax, so such a host keeps its bare name.)
+    if [ "$src" != config ] && [ "$p" = 22 ] && [[ $t != *@* ]]; then t="$u@$h"; fi
     [ "$p" = 22 ] && p= || p=":$p"
     rows+=("$t	$u@$h$p	$src")
   }

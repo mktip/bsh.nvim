@@ -106,7 +106,7 @@ end
 -- `on_cell(code, lines) -> cell|nil` (inline only): on exit, may return a line of
 -- cell text; if it does, the trigger (the line above the fence) AND the fence are
 -- REPLACED by that cell (cursor parked at its end) -- so a command can hand back a
--- ready-to-run cell (e.g. `docker@<id>$$ `) instead of output. Takes precedence
+-- ready-to-run cell (e.g. `docker@<id>%% `) instead of output. Takes precedence
 -- over normal painting/retag.
 -- `decode(raw) -> text` (optional): turns the raw stdout accumulated so far into the
 -- text to render, for commands that stream a protocol (the pi agent's JSONL events)
@@ -189,7 +189,7 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
           return
         end
         -- inline only: a command can EMIT A CELL -- swap its trigger + fence for a
-        -- single line of cell text (e.g. a `docker@<id>$$ ` session cell). Takes
+        -- single line of cell text (e.g. a `docker@<id>%% ` session cell). Takes
         -- precedence over painting; the fence/extmark are removed in the process.
         if on_cell and not sink and vim.api.nvim_buf_is_valid(buf) then
           local cell = on_cell(code, final)
@@ -339,7 +339,7 @@ local function doc_cwd(buf)
   return cwd
 end
 
--- `$ <cmd>` (or `<user@host>$ <cmd>`) : run a shell command. Output goes inline
+-- `% <cmd>` (or `<user@host>% <cmd>`) : run a shell command. Output goes inline
 -- in an `out` fence; with `to_buf` (<C-CR>), into a side buffer with a `log`
 -- reference fence. A cell that already owns a `log` fence stays routed there even
 -- on a plain <CR> (sticky), reusing that same buffer.
@@ -363,8 +363,8 @@ local function run_shell(buf, trow, indent, target, cmd, to_buf, opts)
   run_job(buf, indent, mark, build_argv(target, cmd), cwd, transform, nil, nil, opts.retag, opts.on_cell)
 end
 
--- A one-shot (`$`) run of an explicit argv (used for non-shell one-shots like
--- `python $`; shell one-shots go through run_shell/build_argv). Inline by default;
+-- A one-shot (`%`) run of an explicit argv (used for non-shell one-shots like
+-- `python %`; shell one-shots go through run_shell/build_argv). Inline by default;
 -- `to_buf` (<C-CR>, or sticky) routes it to a side buffer like everything else.
 local function run_oneshot(buf, trow, indent, argv, to_buf)
   local link = existing_log_link(buf, trow)
@@ -378,7 +378,7 @@ local function run_oneshot(buf, trow, indent, argv, to_buf)
   run_job(buf, indent, mark, argv, doc_cwd(buf), shell_transform)
 end
 
--- Cancel the one-shot (`$`/`%`) job under the cursor. Each candidate is an
+-- Cancel the one-shot (`%`) job under the cursor. Each candidate is an
 -- in-flight body extmark; the cell it belongs to spans from its trigger (two
 -- lines above the body) down to its closing ```. With several jobs inflight, only the
 -- one whose region contains `row`. Sets the cancelled flag (so on_exit renders

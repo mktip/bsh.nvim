@@ -37,9 +37,8 @@ end
 -- Is this line an agent trigger (`> x`, `>> x`, `[model]>> x`, optional `!`)?
 -- Returns the arrow count and the instruction.
 local function parse_trigger(l)
-  local arrows, instruction = l:match("^%s*%[[%w_%-]+%](>+)!?%s+(.+)$")
-  if not arrows then arrows, instruction = l:match("^%s*(>+)!?%s+(.+)$") end
-  if arrows then return #arrows, instruction end
+  local c = require("bsh.cell").parse(l)
+  if c and c.kind == "agent" then return c.stateful and 2 or 1, c.body end
 end
 
 -- Rewrite document lines [from, to) as a transcript the agent can read: agent

@@ -1,4 +1,4 @@
--- Persistent language sessions: a `$$` cell runs in ONE long-lived process per
+-- Persistent language sessions: a `%%` cell runs in ONE long-lived process per
 -- (buffer, language, target), so state (env, cd, Python vars/imports, a venv)
 -- carries across cells. Each unit is fed on stdin and framed by a random sentinel
 -- line; output is sliced out and dropped in the cell's fence (or a side buffer).
@@ -13,7 +13,7 @@ local doc_cwd, existing_log_link, begin_buffer_run = job.doc_cwd, job.existing_l
 
 local sessions = {} -- [buf] = { [lang] = { job, spec, token, acc, busy, current, queue } }
 
--- A separate extmark namespace for the cwd prompt badge (eol virt_text on a `$$`
+-- A separate extmark namespace for the cwd prompt badge (eol virt_text on a `%%`
 -- cell's prompt line), so it never tangles with the fence/inflight machinery.
 local promptns = vim.api.nvim_create_namespace("bsh_prompt")
 
@@ -52,8 +52,8 @@ local function local_shell()
 end
 
 -- Remote/transport: the SAME driver, run as a login shell on the far side through
--- the route engine, so a `$$` composes over any transport (`docker@id$$`,
--- `web@prod/docker@api$$`) exactly like a `$`.
+-- the route engine, so a `%%` composes over any transport (`docker@id%%`,
+-- `web@prod/docker@api%%`) exactly like a `%`.
 local function remote_command(token)
   local driver = DRIVER_SH:gsub("@TOKEN@", token)
   return 'case "${SHELL##*/}" in fish|csh|tcsh|nu|xonsh|elvish|pwsh) __s=/bin/sh;; *) __s=${SHELL:-/bin/sh};; esac; '
@@ -135,7 +135,7 @@ local function skey(lang, target)
   return target ~= "" and (lang .. "@" .. target) or lang
 end
 
--- Render the cwd prompt badge for a just-finished `sh` `$$` cell: eol virt_text
+-- Render the cwd prompt badge for a just-finished `sh` `%%` cell: eol virt_text
 -- on its prompt line (`row`, 0-indexed), reading like the shell prompt it mirrors
 -- -- `web@prod:/var/log` remote, just the path locally. We clear the row's prior
 -- badge first so re-running a cell replaces rather than stacks.
@@ -274,12 +274,12 @@ end
 
 -- Queue `cmd` on this buffer's `lang`@`target` session. Output lands inline in an
 -- `out` fence; with `to_buf` (<C-CR>) -- or sticky, if the cell already owns a
--- `log` fence -- in a side buffer, exactly like `$`. A `$$` fence is pure output
--- (nothing to navigate inside it), so the only difference from `$` is that the
+-- `log` fence -- in a side buffer, exactly like `%`. A `%%` fence is pure output
+-- (nothing to navigate inside it), so the only difference from `%` is that the
 -- session streams partial output (see stream_partial) and fills on completion, so
 -- we hand the buffer sink to the queue item and the pump calls it instead of
 -- `fill_fence`.
--- `prow` (0-indexed, optional) is the cell's PROMPT line -- the `$$`/```$$` line
+-- `prow` (0-indexed, optional) is the cell's PROMPT line -- the `%%`/```%%` line
 -- the badge attaches to. Only `sh` sessions surface a cwd badge (it rides the
 -- shell's `$PWD`); a nil `prow` just skips it.
 function M.run_session(buf, lang, target, trow, indent, cmd, to_buf, prow)
@@ -352,7 +352,7 @@ function M.interrupt_session(buf, lang, target)
   return true
 end
 
--- RESET a session: kill its process and forget it, so the next `$$`/`%%` (or
+-- RESET a session: kill its process and forget it, so the next `%%`/`%%` (or
 -- ```python %%```) run starts a fresh interpreter -- clean env, cleared Python
 -- globals, cwd back to the doc dir. Any in-flight/queued cells get their staged
 -- fences finalised to `[session reset]` rather than left dangling on "...running...".

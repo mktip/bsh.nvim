@@ -37,6 +37,7 @@ end
 -- Returns the inclusive 0-indexed row range [start, stop) currently occupied by
 -- a fence (empty range = none yet, insert a fresh one right after the trigger).
 local OWNED_TAGS = { out = true, dir = true, tree = true, agent = true, log = true, menu = true }
+M.OWNED_TAGS = OWNED_TAGS
 function M.fence_range(buf, trow, indent, tag)
   local open = trow + 1
   local total = vim.api.nvim_buf_line_count(buf)

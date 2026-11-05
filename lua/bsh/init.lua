@@ -1,22 +1,18 @@
--- bsh: a "live document" buffer in the spirit of xiki/notebooks.
+-- bsh: a shell in a buffer, in the spirit of xiki and notebooks.
 --
--- A *cell* is a trigger line followed by a result fence that THIS MODULE owns
--- and rewrites. Pressing <CR> on the trigger runs it and replaces the fence's
--- body in place -- so re-running is idempotent (edit the line, <CR> again, the
--- old output is replaced, never duplicated). The fence delimiters are the
--- result's start/end markers, so there is no separate END syntax to invent, and
--- the whole thing survives :w / reload and folds like normal markdown.
+-- A *cell* is a trigger line followed by a result fence that bsh owns and
+-- rewrites. <CR> on the trigger runs it and replaces the fence's body in place,
+-- so re-running is idempotent: edit the line, <CR> again, the old output is
+-- replaced, never duplicated. The fence delimiters mark the result, so there is
+-- no END syntax, and the file survives :w / reload and folds like markdown:
 --
--- Step 1 implements only the `$` shell cell:
---
---     $ ls -la
+--     % ls -la
 --     ```out
 --     total 48
---     drwxr-xr-x  5 mktips ...
 --     ```
 --
--- Future cell kinds (`:` paths, `https://` summaries, `>` agentic llm) plug
--- into the same dispatcher + find-or-replace-fence machinery.
+-- What a line is comes from bsh.cell (the grammar); this module dispatches on it
+-- (execute_cell), adds the keymaps, and wires up the buffer (attach).
 
 local M = {}
 
@@ -51,15 +47,17 @@ local run_list, open_entry, fence_open, fold_path, toggle_tree_node, open_url =
     listing.run_list, listing.open_entry, listing.fence_open, listing.fold_path, listing.toggle_tree_node,
     listing.open_url
 
+local cell = require("bsh.cell")
+
 local namespace = require("bsh.namespace")
 local ns_home, run_namespace, edit_namespace =
     namespace.ns_home, namespace.run_namespace, namespace.edit_namespace
 
 -- Parse a fence info-string into (lang, target, session) or nil if it's not a
--- runnable cell. The run marker is a SUFFIX (`$` once / `$$` session) so the
+-- runnable cell. The run marker is a SUFFIX (`%` once / `%%` session) so the
 -- language word stays first and the block still syntax-highlights:
---   $  $$  user@host$            -> bash (lang "sh"), no language word
---   python $   py $$   ruby $$   -> a language word, then optional target + marker
+--   %  %%  user@host%            -> bash (lang "sh"), no language word
+--   python %   py %%   ruby %%   -> a language word, then optional target + marker
 -- No trailing marker (a plain ```python doc block, or ```out) -> nil (inert).
 -- (parse_runmarker lives in bsh.util.)
 
@@ -121,116 +119,9 @@ end
 -- dispatch (see execute_cell) and cleared by it.
 local attach_lines
 
--- Dispatch on the current line. Returns true if something was handled, false to
--- let <CR> fall through to its default.
-local function execute_cell(to_buf)
-  local buf = vim.api.nvim_get_current_buf()
-  local trow = vim.api.nvim_win_get_cursor(0)[1] - 1
-  local line = vim.api.nvim_buf_get_lines(buf, trow, trow + 1, false)[1] or ""
-  local indent = line:match("^(%s*)")
-
-  -- <CR> on a `log` reference line opens that cell's output buffer in a split.
-  local outlink = line:match("(bsh://out/%S+)")
-  if outlink then
-    open_out_buffer(outlink); return true
-  end
-
-  -- Cursor inside a `$`/`$$` (or `python $`/`$$`) input fence: run the WHOLE
-  -- block (multiline). The owned `out` fence is staged just after the block's
-  -- closing ``` (pass that row as the trigger). Checked first so a body line
-  -- that happens to look like a `$ ...` trigger doesn't run on its own.
-  local fc = input_fence_at(buf, trow)
-  if fc then
-    if fc.lang == "sh" then
-      if fc.session then -- local or remote (`user@host$$`) persistent shell
-        run_session(buf, "sh", fc.target, fc.close, fc.indent, fc.body, to_buf, fc.open)
-      else
-        run_shell(buf, fc.close, fc.indent, fc.target, fc.body, to_buf)
-      end
-    elseif fc.session then -- persistent interpreter, local or remote (`python user@host%%`)
-      run_session(buf, fc.lang, fc.target, fc.close, fc.indent, fc.body, to_buf, fc.open)
-    elseif fc.target ~= "" then -- one-shot on a remote host: route the interpreter through ssh
-      run_oneshot(buf, fc.close, fc.indent,
-        build_argv(fc.target, config.python .. " -c " .. vim.fn.shellescape(fc.body)), to_buf)
-    else -- one-shot local interpreter
-      run_oneshot(buf, fc.close, fc.indent, { config.python, "-c", fc.body }, to_buf)
-    end
-    return true
-  end
-
-  -- Plain <CR> inside a `menu` fence: DRILL. The command DECLARED its output a
-  -- menu (by exiting config.menu_exit -> rendered as ```menu), so every line is a
-  -- valid next arg: append the clicked line (one quoted arg) to the dotted
-  -- trigger and re-run IN PLACE, so the command reinterprets it (list -> drill
-  -- into one). The trigger accumulates a breadcrumb (`docker.list` ->
-  -- `docker.list <id>` -> `… start`) you can edit or backspace to walk back up.
-  -- Plain <CR> is safe here precisely because the command opted in; <C-CR> stays
-  -- "open in a side buffer", so we only drill on a plain <CR> (not to_buf).
-  if not to_buf then
-    local mopen = menu_fence_at(buf, trow)
-    if mopen then
-      local trig = vim.api.nvim_buf_get_lines(buf, mopen - 1, mopen, false)[1] or ""
-      local tindent = trig:match("^(%s*)")
-      local nsname = vim.trim(trig):match("^([%w_][%w_%.%-]*)")
-      local clicked = vim.trim(line)
-      if nsname and clicked ~= "" then
-        local newtrig = vim.trim(trig) .. " " .. vim.fn.shellescape(clicked)
-        vim.api.nvim_buf_set_lines(buf, mopen - 1, mopen, false, { tindent .. newtrig })
-        local nm, ar = newtrig:match("^([%w_][%w_%.%-]*)%s+(.+)$")
-        run_namespace(buf, mopen - 1, tindent, nm, ar, false) -- inline, in place
-        return true
-      end
-    end
-  end
-
-  -- inline shell: `[user@host]<marker> cmd` (one-shot) or `…<marker><marker> cmd`
-  -- (shared session, local or remote). The marker is config.marker (default `%`);
-  -- one unified match captures the optional doubled form, so `user@host%% cmd`
-  -- parses target=`user@host` (NOT `user@host%`, which would corrupt the ssh
-  -- host).
-  local m = vim.pesc(config.marker)
-  local stgt, sdbl, scmd = line:match("^%s*(%S-)(" .. m .. m .. "?)%s+(.+)$")
-  if scmd then
-    if sdbl == config.marker .. config.marker then
-      run_session(buf, "sh", stgt, trow, indent, scmd, to_buf, trow)
-    else
-      run_shell(buf, trow, indent, stgt, scmd, to_buf)
-    end
-    return true
-  end
-
-  -- `https://…` on its own line : open it in the browser.
-  local url = line:match("^%s*(https?://%S+)%s*$")
-  if url then
-    open_url(url)
-    return true
-  end
-
-  -- `> instruction` : agentic call. `>` is stateless; `>>` (two or more arrows)
-  -- continues the thread above it. A visual selection ending on the cell (see the
-  -- visual <CR> map) is attached as extra context. An optional `[name]` before the
-  -- arrows picks the model/template; a trailing `!` lets the agent write/run.
-  local gtpl, gts, gbang, instruction = line:match("^%s*%[([%w_%-]+)%](>+)(!?)%s+(.+)$")
-  if not instruction then
-    gts, gbang, instruction = line:match("^%s*(>+)(!?)%s+(.+)$")
-  end
-  if instruction then
-    local attached = attach_lines
-    attach_lines = nil
-    run_agent(buf, trow, indent, instruction, #gts >= 2, gtpl, gbang == "!", attached)
-    return true
-  end
-
-  -- `[user@host]: path` listing. To avoid firing on prose like "TODO: fix", the
-  -- colon must be the first non-blank char (local) or the target must name a
-  -- host (`user@host`). Remote listings therefore use the user@host form.
-  local ltarget, lrest = line:match("^%s*(%S-):%s+(.+)$")
-  if lrest and (ltarget == "" or ltarget:find("@")) then
-    run_list(buf, trow, indent, ltarget, lrest)
-    return true
-  end
-
-  -- <CR> on an entry inside a `dir`/`tree` fence: open the file / drill into it.
+-- <CR> on an entry line inside a `dir`/`tree` fence. Returns true/false when the
+-- cursor is in such a fence (handled or not), nil when it isn't.
+local function open_listing_entry(buf, trow, line)
   local open, tag = fence_open(buf, trow)
   if open then
     local trig = vim.api.nvim_buf_get_lines(buf, open - 1, open, false)[1] or ""
@@ -310,43 +201,131 @@ local function execute_cell(to_buf)
     end
     return true
   end
+  return nil
+end
 
-  -- `foo.bar!` : edit/define a command's source (authoring). Checked before the
-  -- run branches; `!` never appears in the run/args forms, and a prose `word!`
-  -- is guarded by a confirm before anything is created.
-  local nsbang = line:match("^%s*([%w_][%w_%.%-]*)!%s*$")
-  if nsbang and edit_namespace(nsbang) then
+-- How each definite line-cell kind (see bsh.cell) runs. The tentative namespace
+-- kinds are handled last in execute_cell.
+local LINE_RUN = {
+  shell = function(buf, trow, c, to_buf)
+    if c.session then
+      run_session(buf, "sh", c.target, trow, c.indent, c.body, to_buf, trow)
+    else
+      run_shell(buf, trow, c.indent, c.target, c.body, to_buf)
+    end
+  end,
+  url = function(_, _, c) open_url(c.url) end,
+  agent = function(buf, trow, c)
+    local attached = attach_lines
+    attach_lines = nil
+    run_agent(buf, trow, c.indent, c.body, c.stateful, c.template, c.bang, attached)
+  end,
+  list = function(buf, trow, c) run_list(buf, trow, c.indent, c.target, c.body) end,
+}
+
+-- Dispatch on the current line. Returns true if something was handled, false to
+-- let <CR> fall through to its default.
+local function execute_cell(to_buf)
+  local buf = vim.api.nvim_get_current_buf()
+  local trow = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local line = vim.api.nvim_buf_get_lines(buf, trow, trow + 1, false)[1] or ""
+  local indent = line:match("^(%s*)")
+
+  -- <CR> on a `log` reference line opens that cell's output buffer in a split.
+  local outlink = line:match("(bsh://out/%S+)")
+  if outlink then
+    open_out_buffer(outlink); return true
+  end
+
+  -- Cursor inside a `%`/`%%` (or `python %`/`%%`) input fence: run the WHOLE
+  -- block (multiline). The owned `out` fence is staged just after the block's
+  -- closing ``` (pass that row as the trigger). Checked first so a body line
+  -- that happens to look like a `% ...` trigger doesn't run on its own.
+  local fc = input_fence_at(buf, trow)
+  if fc then
+    if fc.lang == "sh" then
+      if fc.session then -- local or remote (`user@host%%`) persistent shell
+        run_session(buf, "sh", fc.target, fc.close, fc.indent, fc.body, to_buf, fc.open)
+      else
+        run_shell(buf, fc.close, fc.indent, fc.target, fc.body, to_buf)
+      end
+    elseif fc.session then -- persistent interpreter, local or remote (`python user@host%%`)
+      run_session(buf, fc.lang, fc.target, fc.close, fc.indent, fc.body, to_buf, fc.open)
+    elseif fc.target ~= "" then -- one-shot along a route: the interpreter runs at the far end
+      run_oneshot(buf, fc.close, fc.indent,
+        build_argv(fc.target, config.python .. " -c " .. vim.fn.shellescape(fc.body)), to_buf)
+    else -- one-shot local interpreter
+      run_oneshot(buf, fc.close, fc.indent, { config.python, "-c", fc.body }, to_buf)
+    end
     return true
   end
 
-  -- `namespace` cell: a dotted identifier resolving under $BSH_HOME, optionally
-  -- followed by args (`demo.weather Ankara`, `... > out.txt`, `... | grep C`).
-  -- The args go through the shell (see run_ns_exec), so the cell is a true shell
-  -- continuation. Checked last and gated on the FIRST token resolving, so prose
-  -- (which won't resolve) falls through untouched -- args form tried first.
-  local nsname, nsargs = line:match("^%s*([%w_][%w_%.%-]*)%s+(.+)$")
-  if nsname and run_namespace(buf, trow, indent, nsname, nsargs, to_buf) then
-    return true
+  -- Plain <CR> inside a `menu` fence: DRILL. The command DECLARED its output a
+  -- menu (by exiting config.menu_exit -> rendered as ```menu), so every line is a
+  -- valid next arg: append the clicked line (one quoted arg) to the dotted
+  -- trigger and re-run IN PLACE, so the command reinterprets it (list -> drill
+  -- into one). The trigger accumulates a breadcrumb (`docker.list` ->
+  -- `docker.list <id>` -> `… start`) you can edit or backspace to walk back up.
+  -- Plain <CR> is safe here precisely because the command opted in; <C-CR> stays
+  -- "open in a side buffer", so we only drill on a plain <CR> (not to_buf).
+  if not to_buf then
+    local mopen = menu_fence_at(buf, trow)
+    if mopen then
+      local trig = vim.api.nvim_buf_get_lines(buf, mopen - 1, mopen, false)[1] or ""
+      local tindent = trig:match("^(%s*)")
+      local nsname = vim.trim(trig):match("^([%w_][%w_%.%-]*)")
+      local clicked = vim.trim(line)
+      if nsname and clicked ~= "" then
+        local newtrig = vim.trim(trig) .. " " .. vim.fn.shellescape(clicked)
+        vim.api.nvim_buf_set_lines(buf, mopen - 1, mopen, false, { tindent .. newtrig })
+        local nm, ar = newtrig:match("^([%w_][%w_%.%-]*)%s+(.+)$")
+        run_namespace(buf, mopen - 1, tindent, nm, ar, false) -- inline, in place
+        return true
+      end
+    end
   end
-  local dotted = line:match("^%s*([%w_][%w_%.%-]*)%s*$")
-  if dotted and run_namespace(buf, trow, indent, dotted, nil, to_buf) then
+
+  -- a rule from config.rules (user-defined cell kinds, plumber style). Its `run`
+  -- returns a shell command to run as a `%` cell, false to pass, else handled.
+  local rule, caps = cell.user_rule(line)
+  if rule then
+    local res = rule.run({ buf = buf, row = trow, line = line, indent = indent, to_buf = to_buf },
+      unpack(caps))
+    if type(res) == "string" then
+      run_shell(buf, trow, indent, "", res, to_buf)
+      return true
+    end
+    if res ~= false then return true end
+  end
+
+  local c = cell.parse(line)
+  if c and LINE_RUN[c.kind] then
+    LINE_RUN[c.kind](buf, trow, c, to_buf)
     return true
   end
 
+  -- <CR> on an entry inside a `dir`/`tree` fence: open the file / drill into it.
+  -- (Before the namespace kinds: an entry like `notes.txt` would parse as one.)
+  local handled = open_listing_entry(buf, trow, line)
+  if handled ~= nil then return handled end
+
+  -- `foo.bar!` edits/defines a command's source; `foo.bar [args]` runs one. Both
+  -- are tentative: they only fire if the name resolves (or, for `!`, after a
+  -- confirm), so prose falls through untouched.
+  if c and c.kind == "nsedit" then return edit_namespace(c.name) and true or false end
+  if c and c.kind == "ns" then
+    return run_namespace(buf, trow, c.indent, c.name, c.args, to_buf) and true or false
+  end
   return false
 end
 
 -- Is `line` (outside any fence) a cell trigger? `nxt` is the line below it: any
 -- line that already owns a result fence counts, which covers `name.space` cells.
-local OWNED_OPEN = { out = true, dir = true, tree = true, agent = true, log = true, menu = true }
 local function is_trigger(line, nxt)
   local tag = (nxt or ""):match("^%s*```(%S+)%s*$")
-  if tag and OWNED_OPEN[tag] then return true end
-  local m = vim.pesc(config.marker)
-  if line:match("^%s*%S-" .. m .. m .. "?%s+%S") then return true end
-  if line:match("^%s*%[?[%w_%-]*%]?>+!?%s+%S") then return true end
-  local lt, lr = line:match("^%s*(%S-):%s+(%S.*)$")
-  if lr and (lt == "" or lt:find("@")) then return true end
+  if tag and fence.OWNED_TAGS[tag] then return true end
+  local c = cell.parse(line)
+  if c and c.kind ~= "ns" and c.kind ~= "nsedit" then return true end -- ns: only with a fence
   local info = line:match("^%s*```(.+)$")
   return info ~= nil and parse_runmarker(vim.trim(info), config.marker) ~= nil
 end
@@ -443,9 +422,8 @@ local function run_and_continue(insert)
   local buf = vim.api.nvim_get_current_buf()
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local line = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
-  local m = vim.pesc(config.marker)
-  local prefix = line:match("^(%s*%S-" .. m .. m .. "?%s+)%S")
-      or line:match("^(%s*%[?[%w_%-]*%]?>+!?%s+)%S")
+  local c = cell.parse(line)
+  local prefix = c and (c.kind == "shell" or c.kind == "agent") and c.prefix
   if not prefix or input_fence_at(buf, row - 1) then
     if insert then
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "ni", false)
@@ -463,18 +441,14 @@ local function run_and_continue(insert)
 end
 
 -- If the cursor sits on a persistent-session cell, return its { lang, target }.
--- Two cell shapes carry a session: a multiline input fence with the `$$` suffix
--- (```python $$```, ```$$```) and the inline doubled marker (`%% cmd`,
+-- Two cell shapes carry a session: a multiline input fence with the `%%` suffix
+-- (```python %%```, ```%%```) and the inline doubled marker (`%% cmd`,
 -- `user@host%% cmd`). Anything else (one-shots, prose, output fences) -> nil.
 local function classify_session(buf, row)
   local fc = input_fence_at(buf, row)
   if fc and fc.session then return { lang = fc.lang, target = fc.target } end
-  local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
-  local m = vim.pesc(config.marker)
-  local stgt, sdbl, scmd = line:match("^%s*(%S-)(" .. m .. m .. "?)%s+(.+)$")
-  if scmd and sdbl == config.marker .. config.marker then
-    return { lang = "sh", target = stgt }
-  end
+  local c = cell.parse(vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or "")
+  if c and c.kind == "shell" and c.session then return { lang = "sh", target = c.target } end
   return nil
 end
 
@@ -492,7 +466,6 @@ end
 local function collect_session_cells(buf, upto, want)
   local total = vim.api.nvim_buf_line_count(buf)
   local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
-  local m = vim.pesc(config.marker)
   local cells, r = {}, 0
   while r <= upto and r < total do
     local line = gl(r)
@@ -512,10 +485,9 @@ local function collect_session_cells(buf, upto, want)
       r = close + 1
     else
       -- an inline session line is always `sh`; only collect when that's wanted
-      local stgt, sdbl, scmd = line:match("^%s*(%S-)(" .. m .. m .. "?)%s+(.+)$")
-      if scmd and sdbl == config.marker .. config.marker
-          and want.lang == "sh" and stgt == want.target then
-        cells[#cells + 1] = { trow = r, prow = r, indent = line:match("^(%s*)"), cmd = scmd }
+      local c = cell.parse(line)
+      if c and c.kind == "shell" and c.session and want.lang == "sh" and c.target == want.target then
+        cells[#cells + 1] = { trow = r, prow = r, indent = c.indent, cmd = c.body }
       end
       r = r + 1
     end
@@ -548,7 +520,7 @@ local function replay_session()
 end
 
 -- <C-c> / :BshCancel — cancel the running cell under the cursor. A one-shot
--- (`$`/`%`) is stopped outright; a session cell's running command is INTERRUPTED
+-- (`%`) is stopped outright; a session cell's running command is INTERRUPTED
 -- (SIGINT) so the session itself survives. Falls back to the sole busy session in
 -- the buffer when the cursor isn't on a recognisable cell.
 local function cancel_here()
@@ -657,7 +629,8 @@ function M.attach(buf)
     local a, b = vim.fn.line("v"), vim.fn.line(".")
     local first, last = math.min(a, b), math.max(a, b)
     local trig = vim.api.nvim_buf_get_lines(buf, last - 1, last, false)[1] or ""
-    if first < last and trig:match("^%s*%[?[%w_%-]*%]?>+!?%s+%S") then
+    local tc = cell.parse(trig)
+    if first < last and tc and tc.kind == "agent" then
       attach_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last - 1, false)
       vim.cmd("normal! \27")
       vim.api.nvim_win_set_cursor(0, { last, 0 })
@@ -752,7 +725,7 @@ M.config = function()
     pattern = { "*.bsh.md", "*.bsh.markdown" },
     callback = function(args) M.attach(args.buf) end,
   })
-  -- tear a buffer's persistent `$$` shell down when the buffer is wiped.
+  -- tear a buffer's persistent `%%` shell down when the buffer is wiped.
   vim.api.nvim_create_autocmd("BufWipeout", {
     callback = function(args) M.stop_session(args.buf) end,
   })
@@ -771,7 +744,7 @@ M.config = function()
   end, { bang = true, desc = "open a scratch bsh buffer (! = attach to current)" })
 end
 
--- require("bsh").setup({ marker = "$", agent = "llm", ... }): merge options into
+-- require("bsh").setup({ marker = "%", agent = "llm", ... }): merge options into
 -- bsh.config. The plugin already wires itself up from plugin/bsh.lua, so this
 -- only sets options (and is what lazy.nvim's `config = true` / `opts = {}` call).
 -- Table options (e.g. `transports`) are merged, so adding one keeps the defaults.

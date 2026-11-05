@@ -183,6 +183,12 @@ Table options (like `transports`) are merged with the defaults. Options can
 also be set directly: `require("bsh").python = "python3.12"`.
 
 marker              Run marker. Default `"%"`.
+rules               Your own cell kinds, tried before the built-in ones,
+                    first match wins: a list of
+                    `{ match = <lua pattern>, run = function(ctx, ...) }`.
+                    `run` gets the captures (ctx: buf, row, line, indent,
+                    to_buf). Return a shell command to run it as a `%` cell,
+                    `false` to pass the line on, or nothing once handled.
 remote_login        Run remote cells in a login shell. Default `true`.
 transports          Route schemes, see |bsh-routes|.
 python              Interpreter for python cells. Default `"python3"`.

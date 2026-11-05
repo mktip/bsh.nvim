@@ -1,7 +1,7 @@
 -- The namespace: the directory tree under $BSH_HOME *is* a command palette,
 -- 1:1, no registry. A dotted name (`demo.weather`) maps to a path (dots ->
 -- slashes); <CR> runs it (file by shebang / dir's `.enter` / else lists it) and
--- `foo.bar!` edits or scaffolds its source. The run goes through `$`'s one-shot
+-- `foo.bar!` edits or scaffolds its source. The run goes through `%`'s one-shot
 -- shell, so a leaf is a true shell continuation (redirection/pipes/globs/$()).
 local M = {}
 
@@ -41,9 +41,9 @@ end
 
 -- Run a resolved namespace leaf as a SHELL command (not a bare argv), so the
 -- cell is a continuation of the shell: `args` is appended raw and the whole line
--- goes through `$`'s one-shot shell, giving redirection, pipes, globs, `$(...)`
+-- goes through `%`'s one-shot shell, giving redirection, pipes, globs, `$(...)`
 -- sub-shells -- everything the outer shell does. The path is quoted; args are not
--- (they ARE shell syntax). Runs in the document's dir, like `$`. Menu-aware: an
+-- (they ARE shell syntax). Runs in the document's dir, like `%`. Menu-aware: an
 -- exit of config.menu_exit turns the output into a drillable ```menu fence.
 local function run_ns_exec(buf, trow, indent, path, args, to_buf)
   local cmd = vim.fn.shellescape(path)
