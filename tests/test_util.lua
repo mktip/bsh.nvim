@@ -61,6 +61,8 @@ T["join_path"]["joins, normalises, walks up on .."] = function()
   eq(util.join_path("/a/b", "c"), "/a/b/c")
   eq(util.join_path("/a/b/", "c"), "/a/b/c")
   eq(util.join_path("/a/b", ".."), "/a")
+  eq(util.join_path("/", "gpfs"), "/gpfs") -- root must stay absolute, not "./gpfs"
+  eq(util.join_path("//", "gpfs/"), "/gpfs/")
 end
 
 T["setup"] = MiniTest.new_set()

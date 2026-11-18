@@ -47,8 +47,9 @@ function M.join_path(base, name)
   if name == ".." then
     return vim.fn.fnamemodify((base:gsub("/+$", "")), ":h")
   end
+  local root = base:match("^/+$") ~= nil -- "/" itself: stripping slashes must not make it "."
   base = (base:gsub("/+$", ""))
-  if base == "" then
+  if base == "" and not root then
     base = "."
   end
   return base .. "/" .. name

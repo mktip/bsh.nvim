@@ -208,18 +208,32 @@ function M.toggle_tree_node(buf, open, row, target, base, hidden)
   local cwd = target == "" and doc_cwd(buf) or nil
   vim.api.nvim_buf_set_lines(buf, row, row + 1, false, { pad .. "- " .. name, pad .. "  ...listing..." })
   local mark = vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { right_gravity = false })
-  local out = {}
+  local out, errl = {}, {}
   local jb = vim.fn.jobstart(build_argv(target, ls .. qpath(full)), {
     cwd = cwd,
     stdout_buffered = true,
+    stderr_buffered = true,
     on_stdout = function(_, d) out = d or {} end,
-    on_exit = function()
+    on_stderr = function(_, d) errl = d or {} end,
+    on_exit = function(_, code)
       vim.schedule(function()
         if not vim.api.nvim_buf_is_valid(buf) then return end
         local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
         if not pos[1] then return end
         local newlines = format_tree_level(group_entries(out), depth + 1)
-        if #newlines == 0 then newlines = { string.rep("  ", depth + 1) .. "(empty)" } end
+        if #newlines == 0 then
+          -- an empty `ls` that FAILED (permission denied, stale mount, ssh
+          -- error) is not an empty directory: say what went wrong.
+          local msg
+          -- last stderr line: login-shell banners come first, the error last
+          for i = #errl, 1, -1 do if errl[i] ~= "" then msg = errl[i]; break end end
+          local p2 = string.rep("  ", depth + 1)
+          if code ~= 0 then
+            newlines = { p2 .. "(error: " .. (msg or ("exit " .. code)) .. ")" }
+          else
+            newlines = { p2 .. "(empty)" }
+          end
+        end
         vim.api.nvim_buf_set_lines(buf, pos[1] + 1, pos[1] + 2, false, newlines)
         pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
       end)
