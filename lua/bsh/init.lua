@@ -414,30 +414,59 @@ local function output_object(around)
   end
 end
 
--- <M-CR> on a one-line cell: run it, then open a fresh prompt with the same prefix
--- (`% `, `user@host%% `, `>> `...) one blank line below its output, in insert mode,
--- REPL style. Anywhere else it's what <CR> would be: a newline in insert mode, or
--- a plain run / cursor-down in normal mode.
+-- The prompt prefix (`% `, `user@host%% `, `>> `...) of a one-line shell/agent
+-- cell on 1-indexed `row`, or nil.
+local function prompt_prefix(buf, row)
+  if input_fence_at(buf, row - 1) then return nil end
+  local c = cell.parse(vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or "")
+  return c and (c.kind == "shell" or c.kind == "agent") and c.prefix or nil
+end
+
+-- Open a fresh prompt `prefix` one blank line below the output of the cell on
+-- 1-indexed `trow` (just below the trigger if it has none yet), in insert mode.
+local function open_prompt_below(buf, trow, prefix)
+  local line = vim.api.nvim_buf_get_lines(buf, trow - 1, trow, false)[1] or ""
+  local _, stop = fence_range(buf, trow - 1, line:match("^(%s*)"), "out") -- [start, stop), 0-indexed
+  vim.api.nvim_buf_set_lines(buf, stop, stop, false, { "", prefix }) -- a blank line between cells
+  vim.api.nvim_win_set_cursor(0, { stop + 2, #prefix })
+  if vim.fn.mode() ~= "i" then vim.cmd("startinsert!") end
+end
+
+-- <M-CR>, REPL style. Insert mode, on a one-line cell: run it, then open a fresh
+-- prompt with the same prefix below its output (anywhere else: a plain newline).
+-- Normal mode never runs anything: on a cell's trigger or inside its output it
+-- opens a new prompt with that cell's prefix below the output; elsewhere a bare
+-- `<marker> ` prompt below the cursor line.
 local function run_and_continue(insert)
   local buf = vim.api.nvim_get_current_buf()
   local row = vim.api.nvim_win_get_cursor(0)[1]
-  local line = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
-  local c = cell.parse(line)
-  local prefix = c and (c.kind == "shell" or c.kind == "agent") and c.prefix
-  if not prefix or input_fence_at(buf, row - 1) then
-    if insert then
+  if insert then
+    local prefix = prompt_prefix(buf, row)
+    if not prefix then
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "ni", false)
-    elseif not execute_cell(false) then
-      vim.cmd("normal! +")
+      return
     end
+    if execute_cell(false) then open_prompt_below(buf, row, prefix) end
     return
   end
-  if not execute_cell(false) then return end
-  local indent = line:match("^(%s*)")
-  local _, stop = fence_range(buf, row - 1, indent, "out") -- [start, stop), 0-indexed
-  vim.api.nvim_buf_set_lines(buf, stop, stop, false, { "", prefix }) -- a blank line between cells
-  vim.api.nvim_win_set_cursor(0, { stop + 2, #prefix })
-  if not insert then vim.cmd("startinsert!") end
+  local trow = row
+  local prefix = prompt_prefix(buf, row)
+  local fc = input_fence_at(buf, row - 1)
+  if fc then -- in a multiline ```% block: a one-line prompt on the same route, below its output
+    trow = fc.close + 1
+    prefix = fc.indent .. fc.target .. config.marker .. (fc.session and config.marker or "") .. " "
+  elseif not prefix then -- inside a cell's output? use the cell that owns it
+    local open = fence.output_at(buf, row)
+    if open and open > 1 then
+      trow = open - 1
+      prefix = prompt_prefix(buf, trow)
+    end
+  end
+  if prefix then return open_prompt_below(buf, trow, prefix) end
+  local p = (vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""):match("^(%s*)") .. config.marker .. " "
+  vim.api.nvim_buf_set_lines(buf, row, row, false, { p })
+  vim.api.nvim_win_set_cursor(0, { row + 1, #p })
+  vim.cmd("startinsert!")
 end
 
 -- If the cursor sits on a persistent-session cell, return its { lang, target }.

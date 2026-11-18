@@ -149,25 +149,22 @@ T["<M-CR> keeps a route + session prefix, and is a newline on prose"] = function
   eq(vim.list_slice(H.lines(child), 1, 2), { "some prose", "x" })
 end
 
-T["normal <M-CR> runs the cell and leaves you typing the next one"] = function()
+T["normal <M-CR> opens the next prompt without running the cell"] = function()
   H.bootstrap(child, { lines = { "%% echo hi" } })
   child.lua([[
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<M-CR>pwd<Esc>', true, false, true), 'x', false)
   ]])
-  wait_done()
-  eq(H.lines(child), { "%% echo hi", "```out", "hi", "```", "", "%% pwd" })
+  eq(H.lines(child), { "%% echo hi", "", "%% pwd" })
 end
 
-T["normal <M-CR> on a multiline fence just runs it"] = function()
-  H.bootstrap(child, { lines = { "```%", "echo hi", "```" } })
+T["normal <M-CR> in a multiline fence opens a prompt on its route below it"] = function()
+  H.bootstrap(child, { lines = { "```me@host%%", "echo hi", "```", "```out", "hi", "```", "after" } })
   child.lua([[
     vim.api.nvim_win_set_cursor(0, { 2, 0 })
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<M-CR>', true, false, true), 'x', false)
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<M-CR>ls<Esc>', true, false, true), 'x', false)
   ]])
-  wait_done()
-  eq(H.lines(child), { "```%", "echo hi", "```", "```out", "hi", "```" })
-  eq(child.lua_get("vim.fn.mode()"), "n")
+  eq(H.lines(child), { "```me@host%%", "echo hi", "```", "```out", "hi", "```", "", "me@host%% ls", "after" })
 end
 
 return T
