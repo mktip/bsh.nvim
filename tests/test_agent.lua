@@ -23,7 +23,7 @@ end
 
 T["decode_pi: thinking + text deltas + tool lines, partial tail skipped"] = function()
   H.bootstrap(child, { lines = {} })
-  local out = child.lua_get([[require('bsh.agent').decode_pi(table.concat({
+  local out = child.lua_get([[require('bsh.contrib.agent').decode_pi(table.concat({
     '{"type":"message_update","assistantMessageEvent":{"type":"thinking_start"}}',
     '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"a\\nb"}}',
     '{"type":"message_update","assistantMessageEvent":{"type":"thinking_end"}}',
@@ -35,12 +35,12 @@ T["decode_pi: thinking + text deltas + tool lines, partial tail skipped"] = func
     '{"type":"message_upd',
   }, "\n"))]])
   -- one fence: thinking lines, a `[tool] arg` note per call (` (failed)` on error), text
-  eq(out, table.concat({ "```agent", "| a", "| b", "[bash] ls -l", "[read] x.lua (failed)", "done", "```" }, "\n"))
+  eq(out, table.concat({ "| a", "| b", "[bash] ls -l", "[read] x.lua (failed)", "done" }, "\n"))
 end
 
 T["decode_pi: non-JSON output passes through raw"] = function()
   H.bootstrap(child, { lines = {} })
-  eq(child.lua_get([[require('bsh.agent').decode_pi("boom: no auth\n")]]), "```agent\nboom: no auth\n```")
+  eq(child.lua_get([[require('bsh.contrib.agent').decode_pi("boom: no auth\n")]]), "boom: no auth\n")
 end
 
 T["`>` cell runs pi headless and renders its events (``` neutralised)"] = function()
@@ -145,7 +145,7 @@ T["`>>` joins a per-file pi session (same id each time, survives deleting cells)
   eq(out:find("thread so far", 1, true), nil) -- and no re-read of the document
   out = ran(1)
   eq(out:find("--no-session", 1, true) ~= nil, true)
-  child.lua("require('bsh.agent').forget(0)")
+  child.lua("require('bsh.contrib.agent').forget(0)")
   eq(child.lua_get("vim.b.bsh_agent_salt ~= nil"), true)
 end
 

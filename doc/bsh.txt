@@ -189,6 +189,10 @@ CLI.
                     other command in a code block for you to run.
 `[name]> question`  Use model `name` (pi) or template `name` (llm).
 
+The agent is a bundled cell rule (lua/bsh/contrib/agent.lua), written with
+the same API as `rules` (|bsh-rules|). `agent = false` turns it off; a rule of
+your own that matches `>` takes over.
+
 ==============================================================================
 6. YOUR OWN COMMANDS ($BSH_HOME)                               *bsh-namespace*
 
@@ -224,18 +228,30 @@ Table options (like `transports`) are merged with the defaults. Options can
 also be set directly: `require("bsh").python = "python3.12"`.
 
 marker              Run marker. Default `"%"`.
-rules               Your own cell kinds, tried before the built-in ones,
+rules               Your own cell kinds, tried before the built-in ones,     *bsh-rules*
                     first match wins: a list of
                     `{ match = <lua pattern>, run = function(ctx, ...) }`.
-                    `run` gets the captures (ctx: buf, row, line, indent,
-                    to_buf). Return a shell command to run it as a `%` cell,
-                    `false` to pass the line on, or nothing once handled.
+                    `run` gets the captures. Return a shell command to run it
+                    as a `%` cell, `false` to pass the line on, or nothing
+                    once handled. Optional fields:
+                      `prompt(line)` -> what <M-CR> repeats
+                      `tag`          its own fence tag
+                      `fold`         `{ test = fn(line), label = "..." }`:
+                                     nested folds inside its fence
+                      `attach(buf)`  keys/commands for bsh buffers
+                    `match` may be a function `(line) -> captures`.
+                    ctx: buf, row, line, indent, cwd, to_buf, selection (the
+                    lines above it, from a {Visual}<CR>), and
+                    `run(cmd, opts)`: stream an argv list or shell string
+                    into the cell's fence. opts: route, cwd, tag,
+                    placeholder, decode(raw) -> text, on_done(first, last).
 remote_login        Run remote cells in a login shell. Default `true`.
 transports          Route schemes, see |bsh-routes|.
 routes              Route aliases, see |bsh-routes-alias|.
 python              Interpreter for python cells. Default `"python3"`.
 output_max_lines    Inline output cap, `false` for none. Default `2000`.
-agent               `"auto"`, `"pi"` or `"llm"`. Default `"auto"`.
+agent               `"auto"`, `"pi"`, `"llm"` or `false` (no `>` cells).
+                    Default `"auto"`.
 agent_thread        `"session"` or `"document"`, see |bsh-agent|.
 agent_tools         pi tools for `>`. Default `"read,grep,find,ls"`.
 agent_tools_write   pi tools for `>!`.

@@ -28,8 +28,12 @@ end
 
 T["agent cells: arrows, bang, template"] = function()
   H.bootstrap(child)
+  local function parse(line)
+    return child.lua_get("require('bsh.contrib.agent').parse(...)", { line })
+  end
   local c = parse("> hi there")
-  eq({ c.kind, c.stateful, c.bang, c.body, c.prefix }, { "agent", false, false, "hi there", "> " })
+  eq({ c.stateful, c.bang, c.body, c.prefix }, { false, false, "hi there", "> " })
+  eq(child.lua_get("require('bsh.cell').rule_for('> hi').name"), "agent")
   c = parse("[gemma]>>! fix it")
   eq({ c.template, c.stateful, c.bang, c.body, c.prefix }, { "gemma", true, true, "fix it", "[gemma]>>! " })
 end
@@ -69,6 +73,56 @@ T["a user rule can handle the line itself, or pass with false"] = function()
   eq(H.lines(child)[2], "% echo builtin") -- handled, nothing written
   H.run(child, 2)
   eq(vim.list_slice(H.lines(child), 2), { "% echo builtin", "```out", "builtin", "```" })
+end
+
+-- A cell kind of your own with the whole rule API: its own fence (ctx.run),
+-- <M-CR> continuation (prompt), visual-selection context, and ]c / [c.
+local SQL_RULE = [[require('bsh').setup({ rules = { {
+  match = "^sql> (.+)$",
+  prompt = function() return "sql> " end,
+  tag = "rows",
+  run = function(ctx, q)
+    local sel = ctx.selection and table.concat(ctx.selection, ",") or "-"
+    ctx.run({ "sh", "-c", "printf '%s\\n' \"$1\" \"sel=$2\" '```x'", "_", q, sel },
+      { on_done = function(a, b) _G.done = { a, b } end })
+  end,
+} } })]]
+
+T["a rule streams into its own fence via ctx.run"] = function()
+  H.bootstrap(child, { lines = { "sql> select 1" } })
+  child.lua(SQL_RULE)
+  H.run(child, 1)
+  -- ``` in the output is neutralised so it can't close the fence early
+  eq(H.lines(child), { "sql> select 1", "```rows", "select 1", "sel=-", "'''x", "```" })
+  eq(child.lua_get("_G.done"), { 2, 5 })
+  H.run(child, 1) -- a re-run replaces its fence (the tag is owned)
+  eq(#H.lines(child), 6)
+end
+
+T["a rule gets the visual selection, and <M-CR> / ]c know it"] = function()
+  H.bootstrap(child, { lines = { "a", "b", "sql> q" } })
+  child.lua(SQL_RULE)
+  child.lua([[
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('Vjj<CR>', true, false, true), 'x', false)
+    vim.wait(2000, function() return vim.api.nvim_buf_get_lines(0, 5, 6, false)[1] == 'sel=a,b' end)
+  ]])
+  eq(vim.list_slice(H.lines(child), 3, 6), { "sql> q", "```rows", "q", "sel=a,b" })
+  child.lua([[vim.api.nvim_win_set_cursor(0, { 1, 0 }); vim.cmd('normal ]c')]])
+  eq(child.lua_get("vim.fn.line('.')"), 3)
+  child.lua([[
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<M-CR>next<Esc>', true, false, true), 'x', false)
+  ]])
+  eq(vim.list_slice(H.lines(child), 8), { "```", "", "sql> next" })
+end
+
+T["your own rule can take over `>`; agent = false frees it"] = function()
+  H.bootstrap(child)
+  eq(child.lua_get("require('bsh.cell').rule_for('> hi').name"), "agent")
+  child.lua([[require('bsh').setup({ rules = { { name = "mine", match = "^> (.*)$", run = function() end } } })]])
+  eq(child.lua_get("require('bsh.cell').rule_for('> hi').name"), "mine")
+  child.lua([[require('bsh').setup({ rules = {}, agent = false })]])
+  eq(child.lua_get("require('bsh.cell').rule_for('> hi')"), vim.NIL)
 end
 
 return T

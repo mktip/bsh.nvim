@@ -40,14 +40,14 @@ local session = require("bsh.session")
 local run_session = session.run_session
 M.stop_session = session.stop_session -- re-export (BufWipeout autocmd uses require'bsh'.stop_session)
 
-local run_agent = require("bsh.agent").run_agent
-
 local listing = require("bsh.listing")
 local run_list, open_entry, fence_open, fold_path, toggle_tree_node, open_url =
     listing.run_list, listing.open_entry, listing.fence_open, listing.fold_path, listing.toggle_tree_node,
     listing.open_url
 
 local cell = require("bsh.cell")
+-- bundled cell kinds, written as rules (yours in config.rules come first)
+cell.register(require("bsh.contrib.agent").rule)
 
 local namespace = require("bsh.namespace")
 local ns_home, run_namespace, edit_namespace =
@@ -115,9 +115,9 @@ local function menu_fence_at(buf, row)
   return nil
 end
 
--- Lines a visual-mode <CR> selected above an agent cell, consumed by that cell's
--- dispatch (see execute_cell) and cleared by it.
-local attach_lines
+-- Lines a visual-mode <CR> selected above a rule's cell, handed to that rule as
+-- ctx.selection by execute_cell (which clears it).
+local selection_lines
 
 -- <CR> on an entry line inside a `dir`/`tree` fence. Returns true/false when the
 -- cursor is in such a fence (handled or not), nil when it isn't.
@@ -216,11 +216,6 @@ local LINE_RUN = {
     end
   end,
   url = function(_, _, c) open_url(c.url) end,
-  agent = function(buf, trow, c)
-    local attached = attach_lines
-    attach_lines = nil
-    run_agent(buf, trow, c.indent, c.body, c.stateful, c.template, c.bang, attached)
-  end,
   list = function(buf, trow, c) run_list(buf, trow, c.indent, c.target, c.body) end,
 }
 
@@ -286,12 +281,14 @@ local function execute_cell(to_buf)
     end
   end
 
-  -- a rule from config.rules (user-defined cell kinds, plumber style). Its `run`
-  -- returns a shell command to run as a `%` cell, false to pass, else handled.
-  local rule, caps = cell.user_rule(line)
+  -- a rule: your config.rules, then bundled kinds like the `>` agent (plumber
+  -- style). Its `run` returns a shell command to run as a `%` cell, false to
+  -- pass, else it handled the line (often through ctx.run).
+  local rule, caps = cell.rule_for(line)
+  local selection = selection_lines
+  selection_lines = nil
   if rule then
-    local res = rule.run({ buf = buf, row = trow, line = line, indent = indent, to_buf = to_buf },
-      unpack(caps))
+    local res = rule.run(M._rule_ctx(buf, trow, line, indent, to_buf, rule, selection), unpack(caps))
     if type(res) == "string" then
       run_shell(buf, trow, indent, "", res, to_buf)
       return true
@@ -325,6 +322,7 @@ end
 local function is_trigger(line, nxt)
   local tag = (nxt or ""):match("^%s*```(%S+)%s*$")
   if tag and fence.OWNED_TAGS[tag] then return true end
+  if cell.rule_for(line) then return true end
   local c = cell.parse(line)
   if c and c.kind ~= "ns" and c.kind ~= "nsedit" then return true end -- ns: only with a fence
   local info = line:match("^%s*```(.+)$")
@@ -415,12 +413,15 @@ local function output_object(around)
   end
 end
 
--- The prompt prefix (`% `, `user@host%% `, `>> `...) of a one-line shell/agent
--- cell on 1-indexed `row`, or nil.
+-- The prompt prefix (`% `, `user@host%% `, a rule's own like `>> `) of the
+-- one-line cell on 1-indexed `row`, or nil.
 local function prompt_prefix(buf, row)
   if input_fence_at(buf, row - 1) then return nil end
-  local c = cell.parse(vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or "")
-  return c and (c.kind == "shell" or c.kind == "agent") and c.prefix or nil
+  local line = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
+  local rule = cell.rule_for(line)
+  if rule then return rule.prompt and rule.prompt(line) or nil end
+  local c = cell.parse(line)
+  return c and c.kind == "shell" and c.prefix or nil
 end
 
 -- Open a fresh prompt `prefix` (followed by `text`, if given) one blank line
@@ -627,7 +628,7 @@ function M.attach(buf)
     vim.opt_local.foldmethod = "expr"
     vim.opt_local.foldexpr = "v:lua.require'bsh'.foldexpr(v:lnum)"
     vim.opt_local.foldtext = "v:lua.require'bsh'.foldtext()"
-    vim.opt_local.foldlevel = config.agent_hide_thinking and 1 or 99
+    vim.opt_local.foldlevel = 99
     vim.opt_local.fillchars:append("fold: ")
   end)
 
@@ -647,23 +648,22 @@ function M.attach(buf)
   vim.keymap.set("n", "g<CR>", function() run_here(true) end,
     { buffer = buf, desc = "bsh: run cell (output to side buffer)" })
 
-  -- Visual <CR>: when the selection ENDS on an agent cell (`>`/`>>`), run it with
-  -- the lines above it in the selection attached as context. Any other selection
-  -- keeps the default <CR> motion.
+  -- Visual <CR>: when the selection ENDS on a rule's cell (a `>` agent cell, or
+  -- a kind of your own), run it with the lines above it in the selection handed
+  -- over as ctx.selection. Any other selection keeps the default <CR> motion.
   vim.keymap.set("x", "<CR>", function()
     local a, b = vim.fn.line("v"), vim.fn.line(".")
     local first, last = math.min(a, b), math.max(a, b)
     local trig = vim.api.nvim_buf_get_lines(buf, last - 1, last, false)[1] or ""
-    local tc = cell.parse(trig)
-    if first < last and tc and tc.kind == "agent" then
-      attach_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last - 1, false)
+    if first < last and cell.rule_for(trig) then
+      selection_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last - 1, false)
       vim.cmd("normal! \27")
       vim.api.nvim_win_set_cursor(0, { last, 0 })
-      if not execute_cell(false) then attach_lines = nil end
+      if not execute_cell(false) then selection_lines = nil end
     else
       vim.cmd("normal! +")
     end
-  end, { buffer = buf, desc = "bsh: run the agent cell ending the selection, selection attached" })
+  end, { buffer = buf, desc = "bsh: run the cell ending the selection, selection attached" })
 
   -- ]c / [c jump between cells; io / ao select a cell's output (yio, dao, vio).
   vim.keymap.set({ "n", "x", "o" }, "]c", function() jump_cell(1) end,
@@ -692,22 +692,10 @@ function M.attach(buf)
   vim.api.nvim_buf_create_user_command(buf, "BshReset", function(o) reset_here(o.bang) end,
     { bang = true, desc = "reset the session for the cell under the cursor (! = all in buffer)" })
 
-  -- <localleader>t / :BshThinking -- hide or show the agent's thinking lines (a
-  -- fold level of 1 closes the nested thinking folds, 99 opens everything).
-  local function toggle_thinking()
-    vim.api.nvim_buf_call(buf, function()
-      vim.opt_local.foldlevel = vim.wo.foldlevel < 99 and 99 or 1
-    end)
+  -- each rule's own keys/commands (the agent's :BshThinking, :BshForget...)
+  for _, r in ipairs(cell.rules_list()) do
+    if r.attach then r.attach(buf) end
   end
-  vim.keymap.set("n", "<localleader>t", toggle_thinking,
-    { buffer = buf, desc = "bsh: hide/show the agent's thinking" })
-  vim.api.nvim_buf_create_user_command(buf, "BshThinking", toggle_thinking,
-    { desc = "hide/show the agent's thinking lines" })
-
-  vim.api.nvim_buf_create_user_command(buf, "BshForget", function()
-    require("bsh.agent").forget(buf)
-    vim.notify("bsh: the next `>>` starts a fresh conversation")
-  end, { desc = "forget this file's `>>` conversation" })
 
   -- <localleader>r / :BshReplay — replay this session from the top through the
   -- cell under the cursor, into a fresh interpreter (resets first, then re-runs
@@ -724,6 +712,43 @@ function M.attach(buf)
   require("bsh.complete").attach(buf)
   -- per-route command history: <C-p>/<C-n> on a prompt, :BshHistory
   require("bsh.history").attach(buf)
+end
+
+-- The ctx a rule's run gets: where the cell is, the visual selection (if <CR>
+-- came from one), and `run` -- stream a command's output into the cell's own
+-- fence. ctx.run(cmd, opts): cmd is an argv list or a shell string; opts:
+--   route        run a shell string at the end of a route (`me@server`); default local
+--   cwd          default: the doc's folder (local runs)
+--   tag          the fence tag (default: the rule's tag, else "out")
+--   placeholder  shown until output arrives (default "...running...")
+--   decode       function(raw_stdout_so_far) -> text, for protocols (JSON events...)
+--   on_done      function(first, last): the finished body rows (0-indexed)
+-- Output is streamed live; a ``` in it is neutralised so it can't close the
+-- fence; stderr and the exit code are shown only when the command fails.
+function M._rule_ctx(buf, row, line, indent, to_buf, rule, selection)
+  local ctx = { buf = buf, row = row, line = line, indent = indent, to_buf = to_buf,
+    selection = selection, cwd = doc_cwd(buf) }
+  function ctx.run(cmd, opts)
+    opts = opts or {}
+    local argv = type(cmd) == "table" and cmd or build_argv(opts.route or "", cmd)
+    local tag = opts.tag or rule.tag or "out"
+    if not fence.OWNED_TAGS[tag] then fence.own_tag(tag) end
+    local function clean(l) return (l:gsub("```", "'''")) end
+    local mark = stage_fence(buf, row, indent, tag, opts.placeholder or "...running...")
+    run_job(buf, indent, mark, argv, (opts.route or "") == "" and (opts.cwd or ctx.cwd) or nil,
+      function(out, err, code)
+        local lines = {}
+        for _, l in ipairs(out) do lines[#lines + 1] = clean(l) end
+        if code ~= 0 then
+          local e = {}
+          for _, l in ipairs(err) do if l ~= "" then e[#e + 1] = clean(l) end end
+          if #e > 0 then lines[#lines + 1] = "[stderr]"; vim.list_extend(lines, e) end
+          lines[#lines + 1] = "[exit " .. code .. "]"
+        end
+        return lines
+      end, clean, nil, nil, nil, opts.decode, opts.on_done)
+  end
+  return ctx
 end
 
 M._input_fence_at = input_fence_at -- for bsh.complete

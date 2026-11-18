@@ -36,8 +36,17 @@ end
 -- line as `<indent>```<tag>` (tag is "out" for shell, "dir" for listings).
 -- Returns the inclusive 0-indexed row range [start, stop) currently occupied by
 -- a fence (empty range = none yet, insert a fresh one right after the trigger).
-local OWNED_TAGS = { out = true, dir = true, tree = true, agent = true, log = true, menu = true }
+local OWNED_TAGS = { out = true, dir = true, tree = true, log = true, menu = true }
 M.OWNED_TAGS = OWNED_TAGS
+-- Nested folds inside a tag's fence: [tag] = { test = fn(line) -> bool, label }.
+local SUBFOLDS = {}
+
+-- Make `tag` a result fence bsh owns (a re-run replaces it, io/ao select it,
+-- it folds), optionally with nested folds (see bsh.cell rules: `fold`).
+function M.own_tag(tag, fold)
+  OWNED_TAGS[tag] = true
+  SUBFOLDS[tag] = fold
+end
 function M.fence_range(buf, trow, indent, tag)
   local open = trow + 1
   local total = vim.api.nvim_buf_line_count(buf)
@@ -172,12 +181,12 @@ end
 local OPEN = "^%s*```%S"
 local FENCE = "^%s*```%s*$"
 
--- A run of agent "thinking" lines (they start with config.agent_thinking_prefix)
--- inside a fence is its own nested fold, level 2: a foldlevel of 1 hides the
--- thinking and leaves every fence open (see bsh.toggle_thinking).
-local function is_thinking(line)
-  local pre = require("bsh.config").agent_thinking_prefix
-  return pre ~= "" and line:sub(1, #pre) == pre
+-- Runs of lines a fence's tag declares as a nested fold (the agent's thinking
+-- lines, say) are their own fold, level 2: a foldlevel of 1 hides them and
+-- leaves every fence open. Returns the fold spec when `line` is one of them.
+local function subfold(tag, line)
+  local f = tag and SUBFOLDS[tag]
+  if f and f.test(line) then return f end
 end
 
 function M.foldexpr(lnum)
@@ -187,7 +196,8 @@ function M.foldexpr(lnum)
   for l = lnum - 1, 1, -1 do
     local s = vim.fn.getline(l)
     if s:match(OPEN) then -- inside a body
-      if is_thinking(line) then return is_thinking(vim.fn.getline(lnum - 1)) and "2" or ">2" end
+      local tag = s:match("^%s*```(%S+)")
+      if subfold(tag, line) then return subfold(tag, vim.fn.getline(lnum - 1)) and "2" or ">2" end
       return "1"
     end
     if s:match(FENCE) then return "0" end -- a closer above
@@ -200,9 +210,15 @@ end
 function M.foldtext()
   local open = vim.fn.getline(vim.v.foldstart)
   local indent = open:match("^(%s*)")
-  if is_thinking(open) then -- a nested run of thinking lines
+  if vim.fn.foldlevel(vim.v.foldstart) >= 2 then -- a nested run (see subfold)
+    local tag
+    for l = vim.v.foldstart - 1, 1, -1 do
+      tag = vim.fn.getline(l):match("^%s*```(%S+)")
+      if tag then break end
+    end
+    local f = tag and SUBFOLDS[tag]
     local k = vim.v.foldend - vim.v.foldstart + 1
-    return indent .. "+ thinking (" .. k .. (k == 1 and " line)" or " lines)")
+    return indent .. "+ " .. (f and f.label or "fold") .. " (" .. k .. (k == 1 and " line)" or " lines)")
   end
   local tag = open:match("```(%S+)") or "out"
   local n = vim.v.foldend - vim.v.foldstart - 1

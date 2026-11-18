@@ -194,6 +194,12 @@ It uses [pi](https://pi.dev) when it's installed, otherwise the
 - To hand it part of the file, visually select the lines ending on the `>` cell
   and press `<CR>`.
 
+The agent isn't wired into bsh's core. It's a cell kind written with the same
+rule API as your own (below), in
+[`lua/bsh/contrib/agent.lua`](lua/bsh/contrib/agent.lua), so it's also the
+example to copy. `agent = false` turns it off, and a rule of your own matching
+`>` takes over.
+
 ## Your own commands
 
 Point `$BSH_HOME` at a directory (default `~/.config/bsh`) and its tree becomes a
@@ -226,9 +232,9 @@ sessions, a normal terminal or over ssh.
 ## Your own cell kinds
 
 Every line is matched against an ordered list of rules, first match wins (think
-Plan 9's plumber). You can put your own in front of the built-in ones. A rule is
-a Lua pattern plus a function that gets its captures. Return a shell command to
-run it like a `%` cell, or handle the line yourself:
+Plan 9's plumber). Yours come first, then bundled ones like the `>` agent. A
+rule is a Lua pattern plus a function that gets its captures. Return a shell
+command to run it like a `%` cell, or handle the line yourself:
 
 ```lua
 require("bsh").setup({
@@ -243,6 +249,32 @@ require("bsh").setup({
 ```
 
 Return `false` to let the line fall through to the built-in rules.
+
+A rule can go further and become a full cell kind, like the agent:
+
+```lua
+{
+  -- `sql> select ...` runs against a database; the result gets its own fence
+  match = "^sql> (.+)$",
+  run = function(ctx, query)
+    ctx.run({ "sqlite3", "-header", "app.db", query }, { placeholder = "...querying..." })
+  end,
+  tag = "rows",                                  -- its fence is a ```rows block
+  prompt = function() return "sql> " end,        -- <M-CR> opens the next `sql> `
+}
+```
+
+- `ctx.run(cmd, opts)` streams a command (an argv list, or a shell string run on
+  `opts.route`) into the cell's fence, which is replaced on a re-run and
+  selectable with `io`/`ao`. `<C-c>` cancels it. `opts.decode(raw)` turns raw
+  output into text (for JSON event streams), and `opts.on_done(first, last)`
+  runs when the output is complete.
+- `ctx.selection` holds the lines above the cell when you run it from a visual
+  selection. `ctx.buf`, `ctx.row`, `ctx.line`, `ctx.cwd` describe where it is.
+- `match` can also be a function `(line) -> captures`.
+- `fold = { test = fn(line), label = "…" }` folds runs of matching lines inside
+  the fence on their own (the agent's thinking), and `attach = fn(buf)` adds
+  keys or commands to bsh buffers.
 
 ## Install
 
@@ -279,7 +311,7 @@ require("bsh").setup({
   routes = {},              -- route aliases: { box = "me@server", api = "box/podman@api" }
   python = "python3",
   output_max_lines = 2000,  -- inline output cap (false = none); g<CR> has no cap
-  agent = "auto",           -- "pi", "llm" or "auto" (pi if installed)
+  agent = "auto",           -- "pi", "llm", "auto" (pi if installed), or false: no `>` cells
   agent_thread = "session", -- or "document": `>>` re-reads the cells above it
   agent_tools = "read,grep,find,ls",                         -- pi, for `>`
   agent_tools_write = "read,grep,find,ls,bash,edit,write",   -- pi, for `>!`

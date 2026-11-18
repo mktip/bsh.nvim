@@ -23,10 +23,13 @@ function M.check()
   end
 
   h.start("bsh: agent cells")
+  require("bsh.contrib.agent") -- registers its options
   local pi, llm = exe("pi"), exe("llm")
   local want = config.agent
   if want == "auto" then want = pi and "pi" or "llm" end
-  if (want == "pi" and pi) or (want == "llm" and llm) then
+  if want == false then
+    h.info("off (agent = false)")
+  elseif (want == "pi" and pi) or (want == "llm" and llm) then
     h.ok("using " .. want .. (config.agent == "auto" and " (agent = \"auto\")" or ""))
   else
     h.warn("`" .. want .. "` not found: `>` cells won't run. Install pi (https://pi.dev) or llm")

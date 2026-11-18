@@ -127,7 +127,9 @@ end
 -- `decode(raw) -> text` (optional): turns the raw stdout accumulated so far into the
 -- text to render, for commands that stream a protocol (the pi agent's JSONL events)
 -- rather than plain text. Applied to the live preview and the final render alike.
-local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag, on_cell, decode)
+-- `on_done(first, last)` (optional, inline only): called once the final output is
+-- painted, with its body rows [first, last) (0-indexed) -- not on cancel.
+local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag, on_cell, decode, on_done)
   local acc, err_data = "", {}
   -- inline plain output is capped (config.output_max_lines): past the cap, stdout
   -- is only counted, so a runaway `yes` or a huge `cat` can't bloat the buffer
@@ -233,6 +235,10 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
         -- inline only: let the command re-tag its own fence by exit code (e.g.
         -- exit 150 -> `menu`). The body extmark still resolves the body top, so
         -- the opening delimiter is the line just above it.
+        if on_done and not sink and vim.api.nvim_buf_is_valid(buf) then
+          local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
+          if pos[1] then pcall(on_done, pos[1], pos[1] + n) end
+        end
         if retag and not sink and vim.api.nvim_buf_is_valid(buf) then
           local newtag = retag(code)
           local pos = newtag and vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})

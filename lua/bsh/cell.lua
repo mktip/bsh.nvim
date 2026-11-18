@@ -4,11 +4,10 @@
 -- ]c / [c, <M-CR>, visual <CR>, :BshReplay.
 --
 -- A parsed cell is a table: { kind, indent, prefix, ... }, where `prefix` is the
--- text before the body (`user@host%% `, `>> `), the part <M-CR> repeats.
+-- text before the body (`user@host%% `), the part <M-CR> repeats.
 -- Kinds and their fields:
 --   shell   target, session (bool), body          `% cmd`, `user@host%% cmd`
 --   url     url                                   `https://...`
---   agent   template|nil, stateful, bang, body    `> q`, `[model]>>! q`
 --   list    target, body                          `: path`, `user@host: path`
 --   nsedit  name                                  `foo.bar!`
 --   ns      name, args|nil                        `foo.bar args` -- TENTATIVE:
@@ -16,6 +15,10 @@
 --           resolves under $BSH_HOME (bsh.namespace decides).
 -- Multiline input fences (```python %%) and positions inside result fences are
 -- not line cells; the dispatcher handles those first (see bsh.init).
+--
+-- Cell kinds that aren't built into the grammar -- yours (config.rules) and the
+-- bundled ones written the same way (bsh.contrib.*, e.g. the `>` agent) -- are
+-- RULES: see M.rule_for below.
 local M = {}
 
 local config = require("bsh.config")
@@ -32,17 +35,6 @@ end
 local function url(line)
   local indent, u = line:match("^(%s*)(https?://%S+)%s*$")
   if u then return { indent = indent, prefix = indent, url = u } end
-end
-
-local function agent(line)
-  local prefix, indent, tpl, arrows, bang, body =
-      line:match("^((%s*)%[([%w_%-]+)%](>+)(!?)%s+)(%S.-)%s*$")
-  if not body then
-    prefix, indent, arrows, bang, body = line:match("^((%s*)(>+)(!?)%s+)(%S.-)%s*$")
-  end
-  if not body then return nil end
-  return { prefix = prefix, indent = indent, template = tpl,
-    stateful = #arrows >= 2, bang = bang == "!", body = body }
 end
 
 -- The colon must be the first non-blank char (local) or follow a route: one with
@@ -69,7 +61,6 @@ end
 M.rules = {
   { kind = "shell", parse = shell },
   { kind = "url", parse = url },
-  { kind = "agent", parse = agent },
   { kind = "list", parse = list },
   { kind = "nsedit", parse = nsedit },
   { kind = "ns", parse = ns },
@@ -86,13 +77,61 @@ function M.parse(line)
   end
 end
 
--- A user rule from config.rules matching `line`: returns (rule, captures) or nil.
--- A rule is { match = <lua pattern>, run = function(ctx, ...captures) }.
-function M.user_rule(line)
-  for _, r in ipairs(config.rules or {}) do
-    local caps = { line:match(r.match) }
-    if caps[1] ~= nil then return r, caps end
+-- Rules: cell kinds defined outside the grammar, tried before it (first match
+-- wins). Yours come from config.rules; bundled kinds (bsh.contrib.*) register
+-- here and come after yours, so a rule of your own can take over their syntax.
+-- A rule:
+--   match   a Lua pattern (its captures go to run) or function(line) -> value(s)|nil
+--   run     function(ctx, ...captures) -> shell cmd string | false (pass) | nil (handled)
+--   prompt  function(line) -> prefix|nil   what <M-CR> repeats for a new cell
+--   tag     the fence tag its output owns (see bsh.fence.own_tag)
+--   fold    { test = function(line) -> bool, label = "..." }: runs of matching
+--           lines inside its fence fold on their own (level 2)
+--   attach  function(buf): keys/commands, run for every bsh buffer
+local builtin = {}
+
+function M.register(rule)
+  for i, r in ipairs(builtin) do
+    if r.name and r.name == rule.name then builtin[i] = rule; return end
+  end
+  builtin[#builtin + 1] = rule
+  if rule.tag then require("bsh.fence").own_tag(rule.tag, rule.fold) end
+end
+
+function M.unregister(name)
+  for i, r in ipairs(builtin) do
+    if r.name == name then table.remove(builtin, i); return end
   end
 end
+
+-- Every rule, in the order they're tried: config.rules, then the bundled ones.
+function M.rules_list()
+  local all = {}
+  for _, r in ipairs(require("bsh.config").rules or {}) do
+    if r.tag then require("bsh.fence").own_tag(r.tag, r.fold) end
+    all[#all + 1] = r
+  end
+  for _, r in ipairs(builtin) do all[#all + 1] = r end
+  return all
+end
+
+local function try(r, line)
+  if type(r.match) == "function" then
+    local caps = { r.match(line) }
+    if caps[1] ~= nil then return caps end
+  elseif type(r.match) == "string" then
+    local caps = { line:match(r.match) }
+    if caps[1] ~= nil then return caps end
+  end
+end
+
+-- The first rule matching `line`: returns (rule, captures) or nil.
+function M.rule_for(line)
+  for _, r in ipairs(M.rules_list()) do
+    local caps = try(r, line)
+    if caps then return r, caps end
+  end
+end
+M.user_rule = M.rule_for -- (older name)
 
 return M

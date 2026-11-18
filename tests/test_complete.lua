@@ -43,7 +43,7 @@ T["local paths complete in the doc's directory, dirs marked"] = function()
     table.sort(w)
     return w
   ]])
-  eq(words, { "lua/bsh/complete.lua:file", "lua/bsh/config.lua:file" })
+  eq(words, { "lua/bsh/complete.lua:file", "lua/bsh/config.lua:file", "lua/bsh/contrib/:dir" })
 end
 
 T["commands complete from PATH"] = function()
