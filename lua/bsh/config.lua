@@ -97,6 +97,12 @@ M.agent_thinking = false
 -- whatever you delete). llm always uses "document".
 M.agent_thread = "session"
 
+-- Completion in shell cells, from wherever the cell runs (commands from that
+-- route's PATH, paths from its cwd). Only on request: <C-x><C-o>, nvim-cmp's
+-- trigger (a `bsh` source is added to bsh buffers), or <Tab> without nvim-cmp.
+-- false = leave 'omnifunc' and <Tab> alone.
+M.complete = true
+
 -- interpreter used for `python` cells (one-shot `python %` and session `python %%`).
 M.python = "python3"
 

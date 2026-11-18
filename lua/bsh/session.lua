@@ -261,6 +261,7 @@ local function sess_start(buf, lang, target)
           if tonumber(rc) ~= 0 then lines[#lines + 1] = "[exit " .. rc .. "]" end
           if pwd ~= "" then -- shell told us where it is now -> refresh the cwd badge
             s.cwd = pwd
+            s.shell_cwd = pwd -- reported by the shell itself (remote-safe)
             set_prompt_badge(buf, item.prow, s.target, pwd)
           end
           if item.sink then -- <C-CR>: output to a side buffer, not the doc fence
@@ -418,6 +419,14 @@ end
 
 -- The buffer's live sessions, as { lang, target, busy } records -- used by the
 -- dispatcher to disambiguate / fall back when the cursor isn't on a session cell.
+-- Where the (buf, lang, target) session's shell is right now, as last reported
+-- by the shell itself; nil if there's no session or it hasn't run a cell yet.
+-- (A remote session's starting dir is its own $HOME, which we don't know here.)
+function M.session_cwd(buf, lang, target)
+  local s = sessions[buf] and sessions[buf][skey(lang, target)]
+  return s and s.shell_cwd or nil
+end
+
 function M.list_sessions(buf)
   local out = {}
   if sessions[buf] then

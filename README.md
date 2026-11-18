@@ -72,6 +72,7 @@ after 2000 lines (`output_max_lines`); use `g<CR>` for anything bigger.
 | `<localleader>t` | hide / show the agent's thinking lines |
 | visual `<CR>` | when the selection ends on a `>` cell, ask it with the selected lines attached |
 | `<M-CR>` (Alt+Enter) | insert mode: run the cell, then start the next one (same `%`, `user@host%%`, `>>` prefix) a blank line below its output. Normal mode: just open that new prompt, without running anything (on prose, a bare `% `) |
+| `<Tab>` / `<C-x><C-o>` | complete a command or path from wherever the cell runs (see [Completion](#completion)) |
 | `]c` / `[c` | jump to the next / previous cell |
 | `io` / `ao` | text objects for a cell's output (body / whole fence): `yio` copies it, even when folded; `dao` deletes it |
 
@@ -80,6 +81,24 @@ buffer), `:BshReplay`, `:BshThinking`, `:BshForget`. See `:h bsh` for details.
 
 > `<C-CR>` only reaches Neovim in terminals that speak the kitty keyboard
 > protocol (kitty, foot, WezTerm, Ghostty...). `g<CR>` always works.
+
+## Completion
+
+In a shell cell, completion comes from wherever that cell runs:
+`me@server% sq<Tab>` offers the server's `squeue`, `docker@api% ls /e<Tab>`
+the container's `/etc/`. Words in command position complete as commands
+(bash's `compgen -c` on that machine, or a `$PATH` scan if it has no bash);
+anything else completes as a path. Relative paths are resolved in the cell's
+directory: the file's folder locally, `$HOME` remotely, and for a `%%`
+session the directory its shell is in right now.
+
+Nothing pops up while you type. You ask for it with `<C-x><C-o>`. If you use
+nvim-cmp, a `bsh` source is added to bsh buffers, so your own trigger works
+(with `autocomplete = false`, that's the key you mapped). Without nvim-cmp,
+`<Tab>` on a shell line completes. A route's command list is cached for 5
+minutes, directory listings for 5 seconds. Remote lookups cost one ssh round
+trip, so set up `ControlMaster` (below). `complete = false` turns all of this
+off.
 
 ## Remote machines and containers
 
@@ -244,6 +263,7 @@ require("bsh").setup({
   agent_show_thinking = true,
   agent_hide_thinking = false,  -- start with thinking folded away
   otter = "auto",           -- LSP in python fences when otter.nvim is installed
+  complete = true,          -- on-request completion from where the cell runs
 })
 ```
 
@@ -254,8 +274,9 @@ All options are documented in [`lua/bsh/config.lua`](lua/bsh/config.lua) and
 
 - No interactive programs: anything that needs a TTY (`vim`, `htop`, password
   prompts, `ssh` asking for a passphrase) won't work. Use key-based ssh auth.
-- No shell history or tab completion, at least for now. The buffer is your
-  history (see [Cells](#cells)).
+- No shell history, at least for now. The buffer is your history (see
+  [Cells](#cells)). Completion covers commands and paths, not each command's
+  own arguments (`git che…`).
 
 ## Motive
 

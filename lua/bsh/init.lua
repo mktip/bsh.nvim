@@ -717,7 +717,11 @@ function M.attach(buf)
   -- optional: real LSP inside ```python fences via otter.nvim. No-op when otter
   -- isn't installed or config.otter is off (see lua/bsh/otter.lua).
   require("bsh.otter").activate(buf)
+  -- completion from wherever the cell runs (see lua/bsh/complete.lua)
+  require("bsh.complete").attach(buf)
 end
+
+M._input_fence_at = input_fence_at -- for bsh.complete
 
 M.config = function()
   -- expose the run marker to child processes: a cell-emitting namespace command

@@ -85,6 +85,15 @@ i_<M-CR>            (Alt+Enter) On a one-line cell: run it, then start a new
                     anything. Works on a cell, inside its output, or in a
                     multiline ```% block (a one-line prompt on the same
                     route). Elsewhere a bare `% ` prompt below the cursor.
+                                                              *bsh-complete*
+i_<Tab>  i_CTRL-X_CTRL-O
+                    Complete in a shell cell, from wherever the cell runs:
+                    commands in command position (that machine's
+                    `compgen -c`), paths elsewhere (relative to the file's
+                    folder locally, $HOME remotely, or a `%%` session's
+                    current directory). Only on request. With nvim-cmp a
+                    `bsh` source is added to bsh buffers and your own
+                    trigger applies; <Tab> is mapped only without nvim-cmp.
 ]c  [c              Jump to the next / previous cell. Takes a count.
                                                             *bsh-io* *bsh-ao*
 io  ao              Text objects: the output fence under the cursor, or below
@@ -233,6 +242,8 @@ scaffold_lang       Language for `name!` scaffolds: `"sh"` or `"python"`.
 menu_exit           Default `150`.
 cell_exit           Default `151`.
 prompt_badge        Show a session cell's cwd at end of line. Default `false`.
+complete            Completion in shell cells, see |bsh-complete|. Default
+                    `true`.
 
 See lua/bsh/config.lua for the full description of each option.
 
@@ -241,6 +252,7 @@ See lua/bsh/config.lua for the full description of each option.
 
 - No TTY: interactive programs and password prompts don't work. Use key-based
   ssh authentication.
-- No shell history or completion. The buffer is the history.
+- No shell history; the buffer is the history. Completion covers commands
+  and paths, not each command's own arguments.
 
  vim:tw=78:ts=8:ft=help:norl:
