@@ -103,6 +103,16 @@ M.agent_thread = "session"
 -- false = leave 'omnifunc' and <Tab> alone.
 M.complete = true
 
+-- Command history, per route (aliases resolved, so `box%` and `me@server%`
+-- share one). <C-p>/<C-n> on a prompt line walk it, filtered by what you've
+-- typed; :BshHistory / <localleader>h opens it as a buffer. Newest first: what
+-- you ran through bsh on that route, then (history_shell) that machine's own
+-- shell history file, read over the route once per session.
+M.history = true
+M.history_shell = true
+M.history_max = 5000                 -- entries kept per route
+M.history_dir = false                -- false = stdpath("state") .. "/bsh/history"
+
 -- interpreter used for `python` cells (one-shot `python %` and session `python %%`).
 M.python = "python3"
 

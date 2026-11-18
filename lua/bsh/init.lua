@@ -208,6 +208,7 @@ end
 -- kinds are handled last in execute_cell.
 local LINE_RUN = {
   shell = function(buf, trow, c, to_buf)
+    require("bsh.history").add(c.target, c.body)
     if c.session then
       run_session(buf, "sh", c.target, trow, c.indent, c.body, to_buf, trow)
     else
@@ -422,13 +423,15 @@ local function prompt_prefix(buf, row)
   return c and (c.kind == "shell" or c.kind == "agent") and c.prefix or nil
 end
 
--- Open a fresh prompt `prefix` one blank line below the output of the cell on
--- 1-indexed `trow` (just below the trigger if it has none yet), in insert mode.
-local function open_prompt_below(buf, trow, prefix)
+-- Open a fresh prompt `prefix` (followed by `text`, if given) one blank line
+-- below the output of the cell on 1-indexed `trow` (just below the trigger if it
+-- has none yet), in insert mode.
+local function open_prompt_below(buf, trow, prefix, text)
   local line = vim.api.nvim_buf_get_lines(buf, trow - 1, trow, false)[1] or ""
   local _, stop = fence_range(buf, trow - 1, line:match("^(%s*)"), "out") -- [start, stop), 0-indexed
-  vim.api.nvim_buf_set_lines(buf, stop, stop, false, { "", prefix }) -- a blank line between cells
-  vim.api.nvim_win_set_cursor(0, { stop + 2, #prefix })
+  local new = prefix .. (text or "")
+  vim.api.nvim_buf_set_lines(buf, stop, stop, false, { "", new }) -- a blank line between cells
+  vim.api.nvim_win_set_cursor(0, { stop + 2, #new })
   if vim.fn.mode() ~= "i" then vim.cmd("startinsert!") end
 end
 
@@ -719,9 +722,12 @@ function M.attach(buf)
   require("bsh.otter").activate(buf)
   -- completion from wherever the cell runs (see lua/bsh/complete.lua)
   require("bsh.complete").attach(buf)
+  -- per-route command history: <C-p>/<C-n> on a prompt, :BshHistory
+  require("bsh.history").attach(buf)
 end
 
 M._input_fence_at = input_fence_at -- for bsh.complete
+M._open_prompt_below = open_prompt_below -- for bsh.history
 
 M.config = function()
   -- expose the run marker to child processes: a cell-emitting namespace command

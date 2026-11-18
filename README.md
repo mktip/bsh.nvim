@@ -73,11 +73,13 @@ after 2000 lines (`output_max_lines`); use `g<CR>` for anything bigger.
 | visual `<CR>` | when the selection ends on a `>` cell, ask it with the selected lines attached |
 | `<M-CR>` (Alt+Enter) | insert mode: run the cell, then start the next one (same `%`, `user@host%%`, `>>` prefix) a blank line below its output. Normal mode: just open that new prompt, without running anything (on prose, a bare `% `) |
 | `<Tab>` / `<C-x><C-o>` | complete a command or path from wherever the cell runs (see [Completion](#completion)) |
+| `<C-p>` / `<C-n>` | on a prompt, in insert mode: older / newer commands from that route's history, starting with what you've typed (see [History](#history)) |
+| `<localleader>h` | that route's history as a buffer (`:BshHistory`) |
 | `]c` / `[c` | jump to the next / previous cell |
 | `io` / `ao` | text objects for a cell's output (body / whole fence): `yio` copies it, even when folded; `dao` deletes it |
 
 Commands: `:Bsh[!]`, `:BshCancel`, `:BshReset[!]` (`!` = every session in the
-buffer), `:BshReplay`, `:BshThinking`, `:BshForget`. See `:h bsh` for details.
+buffer), `:BshReplay`, `:BshHistory`, `:BshThinking`, `:BshForget`. See `:h bsh` for details.
 
 > `<C-CR>` only reaches Neovim in terminals that speak the kitty keyboard
 > protocol (kitty, foot, WezTerm, Ghostty...). `g<CR>` always works.
@@ -99,6 +101,28 @@ nvim-cmp, a `bsh` source is added to bsh buffers, so your own trigger works
 minutes, directory listings for 5 seconds. Remote lookups cost one ssh round
 trip, so set up `ControlMaster` (below). `complete = false` turns all of this
 off.
+
+## History
+
+Each route has its own history: what you ran through bsh there, from any
+file, followed by that machine's own shell history (`~/.bash_history`, zsh's
+or fish's, read once per session over the route). So on a server you also get
+what you typed there in an ordinary terminal. Route aliases share a history
+with the route they stand for.
+
+On a prompt, `<C-p>` steps back through the commands that start with what
+you've typed (zsh's prefix search): type `sq`, press `<C-p>`, get
+`squeue -u me`. `<C-n>` goes forward; going past the newest gives back what
+you typed. A dim `2/5` at the end of the line shows where you are. `<Up>`
+stays a cursor motion, since this is still a buffer.
+
+To search it, `:BshHistory` (or `<localleader>h`) opens the route's history
+as a buffer, newest at the bottom. Use `/`, a fuzzy finder, anything; `<CR>`
+on a line puts it in the prompt you came from (or a new one below the cell).
+
+History lives in `stdpath("state")/bsh/history`, one file per route.
+`history_shell = false` skips the machine's own history; `history = false`
+turns it all off.
 
 ## Remote machines and containers
 
@@ -264,6 +288,9 @@ require("bsh").setup({
   agent_hide_thinking = false,  -- start with thinking folded away
   otter = "auto",           -- LSP in python fences when otter.nvim is installed
   complete = true,          -- on-request completion from where the cell runs
+  history = true,           -- per-route history: <C-p>/<C-n> on a prompt, :BshHistory
+  history_shell = true,     -- ...including the machine's own shell history
+  history_max = 5000,       -- entries kept per route
 })
 ```
 
@@ -274,9 +301,9 @@ All options are documented in [`lua/bsh/config.lua`](lua/bsh/config.lua) and
 
 - No interactive programs: anything that needs a TTY (`vim`, `htop`, password
   prompts, `ssh` asking for a passphrase) won't work. Use key-based ssh auth.
-- No shell history, at least for now. The buffer is your history (see
-  [Cells](#cells)). Completion covers commands and paths, not each command's
-  own arguments (`git che…`).
+- Completion covers commands and paths, not each command's own arguments
+  (`git che…`).
+- bsh reads a machine's shell history but doesn't write to it.
 
 ## Motive
 
