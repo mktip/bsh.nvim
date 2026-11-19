@@ -5,18 +5,7 @@ local eq = MiniTest.expect.equality
 local child = H.child()
 local T = H.set(child)
 
-local function wait_done()
-  child.lua([[
-    local buf = vim.api.nvim_get_current_buf()
-    vim.wait(5000, function()
-      if next(require('bsh.fence').inflight[buf] or {}) then return false end
-      for _, l in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
-        if l:find('...running', 1, true) then return false end
-      end
-      return true
-    end, 10)
-  ]])
-end
+local function wait_done() H.wait_done(child) end
 
 T["inline output stops at output_max_lines, the rest is counted"] = function()
   H.bootstrap(child, { lines = { "% seq 100000" } })

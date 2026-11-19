@@ -6,29 +6,13 @@ local eq = MiniTest.expect.equality
 local child = H.child()
 local T = H.set(child)
 
--- Feed <CR> on `row` (1-indexed) but DON'T wait for the job to finish -- used for
--- long-running cells we intend to cancel mid-flight.
+-- start a long-running cell we intend to cancel mid-flight (don't wait for it)
 local function start(row)
-  child.lua(
-    [[local row = ...
-      vim.api.nvim_win_set_cursor(0, { row, 0 })
-      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'x', false)
-      vim.wait(200)]],
-    { row }
-  )
+  H.press(child, row)
+  child.lua("vim.wait(200)") -- the process is up
 end
 
--- inflight/sessions are keyed by the real bufnr (what the dispatcher passes), so
--- the specs call the engine with the actual buffer, mirroring production.
--- wait (up to 3s) until some buffer line contains `text`
-local function wait_for(text)
-  child.lua([[local t = ...
-    vim.wait(3000, function()
-      for _, l in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
-        if l:find(t, 1, true) then return true end
-      end
-    end, 20)]], { text })
-end
+local function wait_for(text) H.wait_for(child, text, 3000) end
 
 local function bufeval(c, expr)
   return c.lua_get("(function() local b = vim.api.nvim_get_current_buf(); return " .. expr .. " end)()")
@@ -40,8 +24,7 @@ T["cancel stops a one-shot and notes [cancelled]"] = function()
   -- still running: an `out` fence with the placeholder, job in flight
   eq(bufeval(child, "require('bsh.fence').inflight[b] ~= nil and next(require('bsh.fence').inflight[b]) ~= nil"), true)
   eq(bufeval(child, "require('bsh.job').cancel_at(b, 0)"), true) -- cursor on the trigger (row 0)
-  child.lua("vim.wait(500)")
-  eq(H.rowof(child, "%[cancelled%]") ~= nil, true)
+  eq(H.wait_for(child, "[cancelled]"), true)
 end
 
 T["reset gives a fresh shell session (env cleared)"] = function()

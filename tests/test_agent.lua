@@ -146,7 +146,7 @@ T["visual <CR> ending on a `>` cell attaches the selected lines"] = function()
   boot({ "alpha line", "beta line", "> explain", "tail" })
   child.type_keys("ggVjj") -- select rows 1..3, ending on the `>` cell
   child.type_keys("<CR>")
-  vim.loop.sleep(1500)
+  H.wait_done(child)
   local out = table.concat(H.lines(child), "\n")
   eq(out:find("--- selected from the file", 1, true) ~= nil, true)
   eq(out:find("alpha line\nbeta line", 1, true) ~= nil, true)

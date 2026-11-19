@@ -39,19 +39,26 @@ function M.bootstrap(child, opts)
   )
 end
 
--- Press <CR> (or g<CR>, the side-buffer gesture, when to_buf) on `row`, then let
--- the child's loop drain the async job.
-function M.run(child, row, to_buf)
+-- Press <CR> (or g<CR>, the side-buffer gesture, when to_buf) on `row`, and
+-- return at once: for a cell you want to watch (or stop) while it runs.
+function M.press(child, row, to_buf)
   child.lua(
     [[
     local row, to_buf = ...
     vim.api.nvim_win_set_cursor(0, { row, 0 })
     local key = to_buf and 'g<CR>' or '<CR>'
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(key, true, false, true), 'x', false)
-    -- Settle briefly, then poll until the cell is DONE (bounded at 5s, for slow CI
-    -- runners): no `...running` placeholder left AND no job still in flight. The
-    -- placeholder alone isn't enough: output streams in before the process exits,
-    -- and exit-code effects (a `menu` re-tag, an emitted cell) land only after.
+  ]],
+    { row, to_buf or false }
+  )
+end
+
+-- Let the child's loop drain until every cell is DONE (bounded at 5s, for slow
+-- CI runners): no `...running` placeholder left AND no job still in flight. The
+-- placeholder alone isn't enough: output streams in before the process exits,
+-- and exit-code effects (a `menu` re-tag, an emitted cell) land only after.
+function M.wait_done(child)
+  child.lua([[
     vim.wait(50)
     local buf = vim.api.nvim_get_current_buf()
     vim.wait(5000, function()
@@ -61,9 +68,26 @@ function M.run(child, row, to_buf)
       end
       return true
     end, 10)
-  ]],
-    { row, to_buf or false }
-  )
+  ]])
+end
+
+-- Wait (up to `ms`, default 5s) until some buffer line contains `text` (plain).
+-- Returns whether it showed up.
+function M.wait_for(child, text, ms)
+  return child.lua_get([[(function(t, ms)
+    return vim.wait(ms, function()
+      for _, l in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+        if l:find(t, 1, true) then return true end
+      end
+      return false
+    end, 10)
+  end)(...)]], { text, ms or 5000 })
+end
+
+-- Press <CR> on `row` and wait for the cell to finish.
+function M.run(child, row, to_buf)
+  M.press(child, row, to_buf)
+  M.wait_done(child)
 end
 
 function M.lines(child)
