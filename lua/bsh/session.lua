@@ -131,6 +131,60 @@ local SPECS = {
   },
 }
 
+-- A language from config.languages: its REPL runs along the route (stderr into
+-- stdout, so errors show in the cell), each block is followed by the language's
+-- own `print` of the end marker, and the output is cleaned of the REPL's prompt
+-- (L.prompt) and, with L.echo, of the input lines it echoes back. A hidden first
+-- sync swallows its startup banner. It reports no pid, so <C-c> can't interrupt
+-- it (reset it with <C-k>), and no exit code.
+local function generic_spec(lang)
+  local L = (config.languages or {})[lang]
+  if not L then return nil end
+  local P = L.prompt ~= "" and L.prompt or nil
+  local function unprompt(l)
+    while P and l:sub(1, #P) == P do l = l:sub(#P + 1) end
+    return l
+  end
+  return {
+    warmup = true,
+    argv = function(_, target)
+      return job.build_argv(target, (L.session or L.cmd) .. " 2>&1")
+    end,
+    init = function() end,
+    send = function(s, code)
+      local mark = L.print:format("__BSH_" .. s.token .. "__:0")
+      s.sent = vim.split(code, "\n", { plain = true })
+      s.sent[#s.sent + 1] = mark
+      vim.fn.chansend(s.job, code .. "\n" .. mark .. "\n")
+    end,
+    -- the end marker may come after a prompt on its line (`> __BSH_..:0`)
+    find = function(hay, token)
+      local init = 1
+      while true do
+        local a, b, rc = hay:find("__BSH_" .. token .. "__:(%d+)\r?\n", init)
+        if not a then return nil end
+        local ls = a
+        while ls > 1 and hay:sub(ls - 1, ls - 1) ~= "\n" do ls = ls - 1 end
+        if ls > 1 and unprompt(hay:sub(ls, a - 1)) == "" then return ls - 1, b, rc, "" end
+        init = b + 1
+      end
+    end,
+    clean = function(lines, s)
+      local out, j = {}, 1
+      for _, l in ipairs(lines) do
+        l = unprompt(l)
+        if L.echo and s.sent and s.sent[j] ~= nil and l == s.sent[j] then
+          j = j + 1 -- the REPL echoing what we sent
+        else
+          out[#out + 1] = l
+        end
+      end
+      while #out > 0 and out[#out]:match("^%s*$") do table.remove(out) end
+      return out
+    end,
+  }
+end
+
 -- A session is keyed per buffer by language AND target, so a local bash session
 -- and a `user@host` remote one (or two different hosts) coexist independently.
 local function skey(lang, target)
@@ -180,13 +234,14 @@ end
 -- each repaint -- and the final fill -- replaces exactly what was painted.
 local function stream_partial(buf, s)
   local item = s.current
-  if not (item and s.acc ~= "") then return end
+  if not (item and s.acc ~= "") or item.hidden then return end
   local marker = "__BSH_" .. s.token .. "__:"
   local cut = s.acc:match("^.*()\n") -- index of the last newline, or nil
   local tail = cut and s.acc:sub(cut + 1) or s.acc
   local held = tail ~= "" and (marker:sub(1, #tail) == tail or tail:sub(1, #marker) == marker)
   local text = held and (cut and s.acc:sub(1, cut - 1) or "") or s.acc
   local lines = body_lines(text)
+  if s.spec.clean then lines = s.spec.clean(lines, s) end
   if #lines == 0 or item.last == text then return end
   item.last = text
   vim.schedule(function()
@@ -214,7 +269,8 @@ local function sess_pump(buf, key)
 end
 
 local function sess_start(buf, lang, target)
-  local spec = SPECS[lang]
+  local spec = SPECS[lang] or generic_spec(lang)
+  if not spec then return nil, "no such language: " .. lang end
   local key = skey(lang, target)
   local s = {
     lang = lang,
@@ -249,16 +305,28 @@ local function sess_start(buf, lang, target)
       while true do
         -- sentinel: `__BSH_<token>__:<rc>[:<pwd>]`. The pwd field is sh-only (the
         -- `:?` makes it optional so the python driver's `:<rc>` sentinel matches too).
-        local a, b, rc, pwd = s.acc:find("\n__BSH_" .. s.token .. "__:(%d+):?([^\r\n]*)\r?\n")
+        -- (searched in "\n" .. acc, so a sentinel that is the very first output --
+        -- a block that printed nothing -- still sits at a line start)
+        local hay = "\n" .. s.acc
+        local a, b, rc, pwd
+        if s.spec.find then
+          a, b, rc, pwd = s.spec.find(hay, s.token)
+        else
+          a, b, rc, pwd = hay:find("\n__BSH_" .. s.token .. "__:(%d+):?([^\r\n]*)\r?\n")
+        end
         if not a then break end
-        local body = s.acc:sub(1, a - 1) -- everything before the sentinel line
-        s.acc = s.acc:sub(b + 1)
+        local body = hay:sub(2, a - 1) -- everything before the sentinel line
+        s.acc = hay:sub(b + 1)
         local item = s.current
         s.busy, s.current = false, nil
+        if item and item.hidden then
+          item = nil -- the startup sync: its output (a banner) goes nowhere
+        end
         if item then
           item.done = true -- queued streaming paints for it become no-ops
           if item.timing then item.timing.done(tonumber(rc)) end
           local lines = body_lines(body)
+          if s.spec.clean then lines = s.spec.clean(lines, s) end
           if not item.sink then lines = fence.cap(lines) end -- inline: keep the head
           if tonumber(rc) ~= 0 then lines[#lines + 1] = "[exit " .. rc .. "]" end
           if pwd ~= "" then -- shell told us where it is now -> refresh the cwd badge
@@ -318,6 +386,8 @@ local function sess_start(buf, lang, target)
   if jb <= 0 then return nil end
   s.job = jb
   spec.init(s)
+  -- sync once before the first cell, so a REPL's startup banner isn't its output
+  if spec.warmup then table.insert(s.queue, 1, { cmd = "", hidden = true }) end
   sessions[buf] = sessions[buf] or {}
   sessions[buf][key] = s
   return s

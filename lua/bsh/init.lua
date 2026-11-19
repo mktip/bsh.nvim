@@ -247,6 +247,10 @@ local function execute_cell(to_buf)
       end
     elseif fc.session then -- persistent interpreter, local or remote (`python user@host%%`)
       run_session(buf, fc.lang, fc.target, fc.close, fc.indent, fc.body, to_buf, fc.open)
+    elseif (config.languages or {})[fc.lang] then -- a language of yours, once: the block on its stdin
+      local eof = "__BSH_EOF_" .. vim.uv.hrtime() .. "__"
+      local cmd = config.languages[fc.lang].cmd .. " <<'" .. eof .. "'\n" .. fc.body .. "\n" .. eof
+      run_oneshot(buf, fc.close, fc.indent, build_argv(fc.target, cmd), to_buf)
     elseif fc.target ~= "" then -- one-shot along a route: the interpreter runs at the far end
       run_oneshot(buf, fc.close, fc.indent,
         build_argv(fc.target, config.python .. " -c " .. vim.fn.shellescape(fc.body)), to_buf)

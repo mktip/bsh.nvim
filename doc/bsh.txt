@@ -249,6 +249,16 @@ remote_login        Run remote cells in a login shell. Default `true`.
 transports          Route schemes, see |bsh-routes|.
 routes              Route aliases, see |bsh-routes-alias|.
 python              Interpreter for python cells. Default `"python3"`.
+languages           More cell languages, for ```lang % / ```lang %% blocks
+                    (also along a route). Each: `{ cmd, session?, print,
+                    prompt?, echo? }`. `cmd` gets a one-shot block on stdin;
+                    `session` starts a persistent process; `print` is a
+                    statement printing its argument, with `%s` for the end
+                    marker bsh sends after each block; `prompt` is removed
+                    from output lines; `echo = true` drops echoed input.
+                    Example: `{ sqlite = { cmd = "sqlite3 -batch app.db",
+                    print = ".print %s" } }`. Sessions report no exit code
+                    and can't be interrupted with <C-c> (reset: <C-k>).
 output_max_lines    Inline output cap, `false` for none. Default `2000`.
 agent               `"auto"`, `"pi"`, `"llm"` or `false` (no `>` cells).
                     Default `"auto"`.

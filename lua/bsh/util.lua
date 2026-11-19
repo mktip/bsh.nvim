@@ -76,7 +76,8 @@ end
 -- engine a ` ```lang % ` / ` ```%% ` input fence uses; nil lang = inert. `marker`
 -- is the configured shell symbol (config.marker) -- passed in so this stays a
 -- pure function; the patterns are built from its pattern-escaped form. Session =
--- the optional SECOND marker is present.
+-- the optional SECOND marker is present. Besides the built-in words, any
+-- language in config.languages (pluggable sessions) is one.
 local LANG_ALIAS = { sh = "sh", bash = "sh", shell = "sh", py = "python", python = "python" }
 function M.parse_runmarker(info, marker)
   local m = vim.pesc(marker)
@@ -84,6 +85,7 @@ function M.parse_runmarker(info, marker)
   local word, rest = info:match("^(%a[%w_]*)%s+(.+)$")
   if word then -- language-prefixed form
     local lang = LANG_ALIAS[word]
+    if not lang and (require("bsh.config").languages or {})[word] then lang = word end
     if not lang then
       return nil
     end

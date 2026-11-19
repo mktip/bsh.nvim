@@ -89,6 +89,20 @@ M.history_shell = true
 M.history_max = 5000                 -- entries kept per route
 M.history_dir = false                -- false = stdpath("state") .. "/bsh/history"
 
+-- More languages for ```lang % (once) and ```lang %% (a persistent process)
+-- blocks, local or along a route (```sqlite me@server%%). Each is:
+--   cmd      shell command; a one-shot gets the block on its stdin
+--   session  command for a %% process, if different (e.g. a REPL's -i flag)
+--   print    a statement in that language printing its argument, with %s
+--            where bsh puts a marker: it's how bsh knows a block's output ended
+--   prompt   (optional) a prompt the REPL prints, removed from output lines
+-- e.g. languages = {
+--   sqlite = { cmd = "sqlite3 -batch app.db", print = ".print %s" },
+--   node = { cmd = "node", session = "node -i", print = 'console.log("%s")', prompt = "> " },
+--   lua = { cmd = "lua -", session = "lua -i", print = 'print("%s")', prompt = "> " } }
+-- A session can't report an exit code, so its cells always end `ok`.
+M.languages = {}
+
 -- interpreter used for `python` cells (one-shot `python %` and session `python %%`).
 M.python = "python3"
 

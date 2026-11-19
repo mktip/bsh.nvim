@@ -43,6 +43,7 @@ A cell is a line (or a fenced block) that bsh knows how to run.
 | `docker@id% cmd` | inside a container (any transport you define, see below) |
 | ` ```%% ` … ` ``` ` | a multiline shell block; `<CR>` anywhere inside runs it |
 | ` ```python % ` / ` ```python %% ` | Python, one-shot or a persistent interpreter (remote too: ` ```python user@host%% `) |
+| ` ```node %% `, ` ```sqlite %% `… | any language you add (see [More languages](#more-languages)) |
 | `: path` | list a directory; `<CR>` on an entry drills in or opens the file |
 | `: path -T` / `-H` | a foldable tree / include dotfiles |
 | `: goto query` | fuzzy-jump to a directory under `$HOME` (needs `fd` + `fzf`), then list it |
@@ -106,6 +107,33 @@ nvim-cmp, a `bsh` source is added to bsh buffers, so your own trigger works
 minutes, directory listings for 5 seconds. Remote lookups cost one ssh round
 trip, so set up `ControlMaster` (below). `complete = false` turns all of this
 off.
+
+## More languages
+
+Besides the shell and Python, any interpreter that reads code on stdin can be a
+cell language, once (` ```lang % `) or as a persistent process (` ```lang %% `),
+locally or along a route (` ```sqlite me@server%% `):
+
+```lua
+require("bsh").setup({
+  languages = {
+    sqlite = { cmd = "sqlite3 -batch app.db", print = ".print %s" },
+    node = { cmd = "node", print = 'console.log("%s")',
+      session = [[node -e "require('repl').start({ prompt: '', ignoreUndefined: true })"]] },
+    lua = { cmd = "lua -", session = "lua -i", print = 'print("%s")', prompt = "> ", echo = true },
+  },
+})
+```
+
+- `cmd` runs a one-shot with the block on its stdin; `session` (if different)
+  starts the persistent process.
+- `print` is a statement in that language that prints its argument, with `%s`
+  where bsh puts a marker. After each block bsh sends it, and everything printed
+  before the marker is that cell's output.
+- For a REPL that's chatty, `prompt` is removed from output lines and `echo =
+  true` drops the input lines it echoes back. Its startup banner is skipped.
+- A session can't report an exit code, so its cells always end `ok`, and
+  `<C-c>` can't interrupt it (`<C-k>` resets it).
 
 ## History
 
@@ -318,6 +346,7 @@ require("bsh").setup({
   },
   routes = {},              -- route aliases: { box = "me@server", api = "box/podman@api" }
   python = "python3",
+  languages = {},           -- more cell languages, see "More languages"
   output_max_lines = 2000,  -- inline output cap (false = none); g<CR> has no cap
   agent = "auto",           -- "pi", "llm", "auto" (pi if installed), or false: no `>` cells
   agent_thread = "session", -- or "document": `>>` re-reads the cells above it
