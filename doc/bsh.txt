@@ -123,7 +123,7 @@ io  ao              Text objects: the output fence under the cursor, or below
 <localleader>t                                                  *:BshThinking*
 :BshThinking        Hide or show the agent's thinking lines.
                                                                    *:BshForget*
-:BshForget          Start a new `>>` conversation for this file.
+:BshForget          With agent_memory on: start a new conversation for this file.
 
 ==============================================================================
 4. ROUTES: SSH, CONTAINERS                                        *bsh-routes*
@@ -176,13 +176,23 @@ fence: its text, thinking as lines starting with `| `, and one `[tool] arg`
 line per tool call. It uses pi (https://pi.dev) if installed, else the `llm`
 CLI.
 
-`> question`        No memory: the agent sees only the question (and any
-                    lines attached with {Visual}<CR>).
-`>> question`       Continue this file's conversation. With pi, pi keeps the
-                    conversation (one per file path), so deleting cells doesn't
-                    make it forget; |:BshForget| starts over. With llm, or with
-                    `agent_thread = "document"`, it re-reads the cells above
-                    instead, back to the nearest `>`, heading or `---` line.
+What the agent sees is read from the buffer as it is now and pasted into the
+prompt (no tool call):
+
+`> question`        The question, plus the cell just above it (a command and
+                    its output; prose in between comes along). Not an agent
+                    cell, and not past a heading or `---`: a new `>` is a
+                    fresh conversation.
+`>> question`       Everything from the last `>` down: the cell it saw, the
+                    questions and answers, commands run in between. With no
+                    `>` above, the same as `>`.
+{Visual}<CR>        On a `>` cell ending the selection: exactly the selected
+                    lines, plus the question.
+
+A dim note after the question shows what was sent (`1 cell · 165 chars`,
+`fresh`...). No hidden memory by default; `agent_memory = "session"` makes pi
+also remember a file's earlier turns until you quit Neovim ("file": across
+restarts, |:BshForget| starts over).
 `>! question`       Let the agent run commands and edit files (pi:
                     `agent_tools_write`; llm: `--td`). Without `!` it's
                     read-only: it can read and search files, and proposes any
@@ -262,8 +272,11 @@ languages           More cell languages, for ```lang % / ```lang %% blocks
 output_max_lines    Inline output cap, `false` for none. Default `2000`.
 agent               `"auto"`, `"pi"`, `"llm"` or `false` (no `>` cells).
                     Default `"auto"`.
-agent_thread        `"session"` or `"document"`, see |bsh-agent|.
-agent_model         `false` (pi or llm decides; a resumed `>>` conversation
+agent_memory        `false` (the buffer is all it knows), `"session"` (pi also
+                    remembers a file's turns until you quit), `"file"` (across
+                    restarts). See |bsh-agent|. Older `agent_thread =
+                    "session"` means `"file"`.
+agent_model         `false` (pi or llm decides; a resumed conversation
                     keeps the model it started with), `"default"` (pi's
                     current defaultModel, read from its settings.json on
                     every run), or a model name. `[model]>` overrides it.

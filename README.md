@@ -212,23 +212,39 @@ require("bsh").setup({
 It uses [pi](https://pi.dev) when it's installed, otherwise the
 [`llm`](https://llm.datasette.com/) CLI.
 
-- `>` has no memory: it sees only the question.
-- `>>` continues this file's conversation. With pi, the conversation is
-  remembered by pi itself (keyed to the file path), so deleting cells doesn't
-  make it forget; `:BshForget` starts a new one. With `llm`, or with
-  `agent_thread = "document"`, `>>` instead re-reads the cells above it, back to
-  the nearest `>`, heading or `---`.
+What it sees comes straight from the buffer, as it is now (unsaved edits
+included), pasted into the prompt:
+
+```
+% tar -xf backup.tar.zst -C /root
+```out
+tar: backup.tar.zst: Cannot open: No such file or directory
+```
+> why did it fail?                     <- sees the cell just above
+>> what should I run instead?          <- sees everything since that `>`
+```
+
+| You write | The agent gets |
+|-----------|----------------|
+| `> q` | q, plus the cell just above (a command and its output, prose in between), but not an agent cell, and not past a heading or `---`. So a new `>` is a fresh conversation. |
+| `>> q` | everything from the last `>` down: the cell it saw, the questions and answers, commands you ran in between. With no `>` above, same as `>`. |
+| visual selection, `<CR>` on a `>` | exactly the selected lines, plus q |
+
+A dim note after the question shows what was sent (`1 cell · 165 chars`,
+`thread: 3 cells · 2.1k chars`, `fresh`). There's no hidden memory by default:
+what's above the question is all it knows. `agent_memory = "session"` makes pi
+also remember a file's earlier turns until you quit Neovim (`"file"`: across
+restarts; `:BshForget` starts over).
+
 - The agent is read-only by default: it can read and search files itself, and
   for anything else it suggests a command for you to run. End the arrows with
   `!` (`>!`, `>>!`) to let it run commands and edit files.
 - Tool calls show up as `[tool] arg` lines and thinking as `| ` lines (hide them
   with `<localleader>t`).
-- `[model]> question` picks a model (pi) or template (llm). A pi conversation
-  remembers the model it started with, so a `>>` keeps using it even after you
-  change your default; `agent_model = "default"` makes every cell use pi's
-  current default instead (or set a model name).
-- To hand it part of the file, visually select the lines ending on the `>` cell
-  and press `<CR>`.
+- `[model]> question` picks a model (pi) or template (llm). With
+  `agent_memory` on, a pi conversation keeps the model it started with;
+  `agent_model = "default"` makes every cell use pi's current default instead
+  (or set a model name).
 
 The agent isn't wired into bsh's core. It's a cell kind written with the same
 rule API as your own (below), in
@@ -349,7 +365,7 @@ require("bsh").setup({
   languages = {},           -- more cell languages, see "More languages"
   output_max_lines = 2000,  -- inline output cap (false = none); g<CR> has no cap
   agent = "auto",           -- "pi", "llm", "auto" (pi if installed), or false: no `>` cells
-  agent_thread = "session", -- or "document": `>>` re-reads the cells above it
+  agent_memory = false,     -- pi also remembers earlier turns: "session" (until you quit) or "file"
   agent_model = false,      -- false: pi decides; "default": pi's current default; or a name
   agent_tools = "read,grep,find,ls",                         -- pi, for `>`
   agent_tools_write = "read,grep,find,ls,bash,edit,write",   -- pi, for `>!`
