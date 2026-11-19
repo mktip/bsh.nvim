@@ -58,4 +58,22 @@ T["<CR> on a file in a routed listing opens it remotely"] = function()
   eq(H.lines(child), { 'print("hi")', "x = 1" })
 end
 
+T["a failed re-read keeps the buffer; an unread buffer won't overwrite the file"] = function()
+  setup()
+  child.lua([[
+    require('bsh.remote').open(ROUTE, DIR .. '/a.py')
+    vim.fn.setfperm(DIR .. '/a.py', '---------') -- the next read fails (no permission)
+    vim.cmd('silent! edit')
+  ]])
+  eq(H.lines(child), { 'print("hi")', "x = 1" }) -- not wiped
+  -- a file that could never be read: :w refuses, the real file is untouched
+  child.lua([[
+    vim.fn.writefile({ 'secret' }, DIR .. '/b.txt'); vim.fn.setfperm(DIR .. '/b.txt', '---------')
+    pcall(require('bsh.remote').open, ROUTE, DIR .. '/b.txt')
+    vim.cmd('silent! write')
+    vim.fn.setfperm(DIR .. '/b.txt', 'rw-------')
+  ]])
+  eq(child.lua_get("vim.fn.readfile(DIR .. '/b.txt')"), { "secret" })
+end
+
 return T
