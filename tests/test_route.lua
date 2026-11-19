@@ -23,13 +23,13 @@ end
 T["a plain host is an ssh login-shell hop (back-compat)"] = function()
   H.bootstrap(child)
   eq(argv("web@prod", "ls"),
-    { "ssh", "-T", "web@prod", "exec ${SHELL:-/bin/sh} -lc " .. esc("ls") })
+    { "ssh", "-T", "--", "web@prod", "exec ${SHELL:-/bin/sh} -lc " .. esc("ls") })
 end
 
 T["remote_login=false drops the login wrapper"] = function()
   H.bootstrap(child)
   child.lua("require('bsh').remote_login = false")
-  eq(argv("web@prod", "ls"), { "ssh", "-T", "web@prod", "ls" })
+  eq(argv("web@prod", "ls"), { "ssh", "-T", "--", "web@prod", "ls" })
 end
 
 T["route aliases expand, alone, inside a chain, and through each other"] = function()
@@ -37,7 +37,7 @@ T["route aliases expand, alone, inside a chain, and through each other"] = funct
   child.lua([[require('bsh').setup({ routes = { box = "me@server", api = "box/podman@api" } })]])
   eq(argv("api", "ls"), argv("me@server/podman@api", "ls"))
   eq(argv("box/docker@db", "ls"), argv("me@server/docker@db", "ls"))
-  eq(argv("other", "ls")[3], "other") -- not an alias: still a plain ssh host
+  eq(argv("other", "ls")[4], "other") -- not an alias: still a plain ssh host
   child.lua([[require('bsh').setup({ routes = { a = "b", b = "a" } })]])
   eq(type(argv("a", "ls")), "table") -- a loop stops expanding instead of hanging
 end
@@ -63,7 +63,7 @@ end
 T["an unregistered scheme stays a plain ssh destination"] = function()
   H.bootstrap(child)
   eq(argv("k8s@pod", "ls"), -- k8s not registered by default -> ssh to host `k8s@pod`
-    { "ssh", "-T", "k8s@pod", "exec ${SHELL:-/bin/sh} -lc " .. esc("ls") })
+    { "ssh", "-T", "--", "k8s@pod", "exec ${SHELL:-/bin/sh} -lc " .. esc("ls") })
 end
 
 T["a user-defined transport is honoured"] = function()
@@ -81,12 +81,18 @@ end
 T["a container over ssh nests (host first, then container)"] = function()
   H.bootstrap(child)
   local a = argv("web@prod/docker@api", "ls")           -- outside-in: ssh host, then into container
-  eq({ a[1], a[2], a[3] }, { "ssh", "-T", "web@prod" }) -- leftmost hop is the outer ssh one
+  eq({ a[1], a[2], a[3], a[4] }, { "ssh", "-T", "--", "web@prod" }) -- leftmost hop is the outer ssh one
   -- the command it runs on prod is the docker exec into api (each word is quoted
   -- by shelljoin, so assert the words are present rather than a literal substring)
   eq(child.lua_get([[(function(s)
     return s:find('docker', 1, true) and s:find('exec', 1, true) and s:find('api', 1, true) ~= nil
-  end)(...)]], { a[4] }), true)
+  end)(...)]], { a[5] }), true)
+end
+
+T["a route can't smuggle in an ssh option"] = function()
+  H.bootstrap(child)
+  local a = argv("-oProxyCommand=touch x", "ls")
+  eq({ a[1], a[3], a[4] }, { "ssh", "--", "-oProxyCommand=touch x" })
 end
 
 return T

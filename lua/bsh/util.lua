@@ -29,13 +29,15 @@ end
 
 -- Quote a path for the shell while keeping a leading ~ / ~user prefix expandable.
 -- Tilde expansion needs the slash right after ~ to be UNQUOTED (it ends the
--- tilde-prefix), so keep `~prefix/` verbatim and shellescape only the rest.
+-- tilde-prefix), so keep `~prefix/` verbatim and shellescape only the rest. The
+-- unquoted part may only be a username (letters, digits, _ . -): anything else
+-- (`~$(cmd)/`, `~;cmd`) is quoted whole, and simply won't expand.
 function M.qpath(path)
-  local pre, rest = path:match("^(~[^/]*/)(.*)$")
+  local pre, rest = path:match("^(~[%w_%.%-]*/)(.*)$")
   if pre then
     return pre .. (rest == "" and "" or vim.fn.shellescape(rest))
   end
-  if path:match("^~[^/]*$") then
+  if path:match("^~[%w_%.%-]*$") then
     return path -- bare ~ or ~user
   end
   return vim.fn.shellescape(path)

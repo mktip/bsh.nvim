@@ -79,4 +79,12 @@ T["setup"]["merges options, keeps default transports"] = function()
   vim.env.BSH_MARKER = saved.marker
 end
 
+T["qpath keeps ~ and ~user expandable, quotes anything else"] = function()
+  eq(util.qpath("~/a b"), "~/'a b'")
+  eq(util.qpath("~bob/x"), "~bob/'x'")
+  eq(util.qpath("~"), "~")
+  eq(util.qpath("~$(id)/x"), "'~$(id)/x'")
+  eq(util.qpath("~;touch /tmp/pwn"), "'~;touch /tmp/pwn'")
+end
+
 return T

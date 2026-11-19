@@ -21,14 +21,16 @@ local stage_fence = fence.stage_fence
 --   `web@prod/docker@api` -> ssh hop (outer) wrapping a docker hop (inner)
 -- ssh runs a *login* shell so the remote profile loads (PATH/env); -T = no pty
 -- (we capture non-interactively, stdin closed -> auth must be non-interactive).
+-- `--` ends ssh's options, so a route that starts with `-` (say, in a file
+-- someone sent you) is a hostname, never `-oProxyCommand=...`.
 
 -- The built-in ssh hop (depends on remote_login). `{cmd}` is embedded in a word
 -- the REMOTE shell re-parses, so it gets shell-escaped (see subst).
 local function ssh_template()
   if config.remote_login then
-    return { "ssh", "-T", "{addr}", "exec ${SHELL:-/bin/sh} -lc {cmd}" }
+    return { "ssh", "-T", "--", "{addr}", "exec ${SHELL:-/bin/sh} -lc {cmd}" }
   end
-  return { "ssh", "-T", "{addr}", "{cmd}" }
+  return { "ssh", "-T", "--", "{addr}", "{cmd}" }
 end
 
 -- Substitute one template element. `{addr}` is always literal (a hostname/id, or
