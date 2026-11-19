@@ -56,4 +56,11 @@ T["python %% to buffer: state persists, each cell its own buffer"] = function()
   eq(side_lines(), { "r*r = 49" }) -- side_lines returns the LAST log fence's buffer
 end
 
+T["python % to buffer: a one-shot block streams there too"] = function()
+  H.bootstrap(child, { name = "po.bsh", lines = { "```python %", "print(6 * 7)", "```" } })
+  H.run(child, 2, true)
+  eq(side_lines(), { "42" })
+  eq(H.lines(child)[5]:match("^bsh://out/") ~= nil, true) -- the reference line
+end
+
 return T

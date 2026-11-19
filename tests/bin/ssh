@@ -1,0 +1,11 @@
+#!/bin/sh
+# A stand-in for ssh in tests: accepts exactly what bsh runs (`ssh -T -- host
+# cmd...`) and does what ssh does with the rest -- joins the words with spaces
+# and has a shell on the "remote" side parse that string. So the quoting a real
+# ssh hop needs is exercised, with no sshd. $SHELL is the "remote" login shell.
+if [ "$1" != "-T" ] || [ "$2" != "--" ] || [ -z "$3" ]; then
+  echo "fake ssh: unexpected arguments: $*" >&2
+  exit 255
+fi
+shift 3
+SHELL=/bin/sh exec sh -c "$*"

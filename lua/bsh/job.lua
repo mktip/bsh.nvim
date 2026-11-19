@@ -110,10 +110,14 @@ end
 
 -- Run `argv` async, streaming stdout into the fence body LIVE (re-rendering the
 -- body as each chunk arrives, so long-running commands update as they go rather
--- than dumping everything at exit). stderr is held and folded in at the end via
+-- than dumping everything at exit). `o` holds the rest, all optional:
+-- `cwd`; `stdin`: text written to the command's stdin before it's closed (so
+-- commands see EOF; without it, stdin is just closed) -- how an interpreter gets
+-- its script, with no limit on its size (an argument is capped at 128KB).
+-- stderr is held and folded in at the end via
 -- `transform(out_lines, err_lines, code) -> lines` (the authoritative final
--- render). `line_xform`, if given, post-processes each line of the live preview
--- (e.g. neutralising ``` in agent output). stdin is closed so commands see EOF.
+-- render; default shell_transform). `line_xform`, if given, post-processes each
+-- line of the live preview (e.g. neutralising ``` in agent output).
 -- `sink(lines, final, code)` decides WHERE the streamed output goes. Default is
 -- inline: replace the cell's owned fence body (at `mark`) with `lines`. A buffer
 -- sink (see buffer_sink) instead streams into a side buffer and updates a one-line
@@ -131,7 +135,12 @@ end
 -- rather than plain text. Applied to the live preview and the final render alike.
 -- `on_done(first, last)` (optional, inline only): called once the final output is
 -- painted, with its body rows [first, last) (0-indexed) -- not on cancel.
-local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink, retag, on_cell, decode, on_done)
+local shell_transform
+
+local function run_job(buf, indent, mark, argv, o)
+  o = o or {}
+  local transform, line_xform, sink, retag, on_cell, decode, on_done =
+      o.transform or shell_transform, o.line_xform, o.sink, o.retag, o.on_cell, o.decode, o.on_done
   local acc, err_data = "", {}
   -- inline plain output is capped (config.output_max_lines): past the cap, stdout
   -- is only counted, so a runaway `yes` or a huge `cat` can't bloat the buffer
@@ -143,8 +152,8 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
   local capped, dropped_nl, partial = false, 0, false
   local function dropped() return capped and dropped_nl + (partial and 1 or 0) or 0 end
   local n = 1 -- how many body lines we currently occupy (starts: the placeholder)
-  -- replace our [row, row+n) body region with `lines`; returns the new n.
-  local function inline_paint(lines)
+  -- replace our [row, row+n) body region with `lines` (same shape as a sink).
+  local function inline_paint(lines, _final, _code)
     if not vim.api.nvim_buf_is_valid(buf) then return end
     local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
     if not pos[1] then return end -- mark gone (cell re-run / cleared) -> stale
@@ -169,8 +178,8 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
       timing = require("bsh.status").start(buf, pos[1] - 2, { quiet = tag == "dir" or tag == "tree" })
     end
   end
-  local job = vim.fn.jobstart(argv, {
-    cwd = cwd,
+  local ok, job = pcall(vim.fn.jobstart, argv, {
+    cwd = o.cwd,
     stderr_buffered = true,
     on_stdout = function(_, d)
       if not d then return end
@@ -262,12 +271,23 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
       end)
     end,
   })
-  if job > 0 then
+  if ok and job > 0 then
     inflight[buf][mark] = job
+    if o.stdin then vim.fn.chansend(job, o.stdin) end
     pcall(vim.fn.chanclose, job, "stdin")
-  else
-    timing.done(nil, "couldn't start")
+    return
   end
+  -- it never ran: say why in the cell, instead of leaving it on `...running...`
+  local why = not ok and tostring(job):gsub("^Vim:", ""):gsub("^E%d+: ", "")
+      or job == -1 and ("not executable: " .. tostring(argv[1])) or "invalid arguments"
+  if why:find("argument list too long", 1, true) then
+    why = "the block is too big to pass as an argument (128KB at most); "
+        .. "a ```python % block has no such limit, or run a script file"
+  end
+  timing.done(nil, "couldn't start")
+  paint({ "[couldn't start: " .. why .. "]" }, true, -1)
+  pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
+  if inflight[buf] then inflight[buf][mark] = nil end
 end
 
 -- ───────────────────────── side-buffer output (<C-CR>) ───────────────────────
@@ -354,7 +374,7 @@ local function open_out_buffer(name)
 end
 
 -- Shell-style result: stdout, then any stderr, then a non-zero exit note.
-local function shell_transform(out_data, err_data, code)
+function shell_transform(out_data, err_data, code)
   local lines = {}
   while #out_data > 0 and out_data[#out_data] == "" do table.remove(out_data) end
   vim.list_extend(lines, out_data)
@@ -392,27 +412,33 @@ local function run_shell(buf, trow, indent, target, cmd, to_buf, opts)
   local cwd = remote and nil or doc_cwd(buf)
   if to_buf then
     local mark, sink = begin_buffer_run(buf, trow, indent, link)
-    run_job(buf, indent, mark, build_argv(target, cmd), cwd, transform, nil, sink)
+    run_job(buf, indent, mark, build_argv(target, cmd), { cwd = cwd, transform = transform, sink = sink })
     return
   end
   local mark = stage_fence(buf, trow, indent, "out",
     remote and ("...running on " .. target .. "...") or "...running...")
-  run_job(buf, indent, mark, build_argv(target, cmd), cwd, transform, nil, nil, opts.retag, opts.on_cell)
+  run_job(buf, indent, mark, build_argv(target, cmd),
+    { cwd = cwd, transform = transform, retag = opts.retag, on_cell = opts.on_cell })
 end
 
--- A one-shot (`%`) run of an explicit argv (used for non-shell one-shots like
--- `python %`; shell one-shots go through run_shell/build_argv). Inline by default;
--- `to_buf` (<C-CR>, or sticky) routes it to a side buffer like everything else.
-local function run_oneshot(buf, trow, indent, argv, to_buf)
+-- A one-shot (`%`) interpreter block (```python %, ```lang %): `cmd` (a shell
+-- command, run along `target`) reads the program from its stdin, which gets
+-- `body`. Shell blocks go through run_shell instead: a script on stdin would be
+-- read by any command in it that reads stdin. Inline by default; `to_buf`
+-- (<C-CR>, or sticky) routes it to a side buffer like everything else.
+local function run_oneshot(buf, trow, indent, target, cmd, body, to_buf)
   local link = existing_log_link(buf, trow)
   if link then to_buf = true end
+  local o = { cwd = target == "" and doc_cwd(buf) or nil, stdin = body .. "\n" }
   if to_buf then
     local mark, sink = begin_buffer_run(buf, trow, indent, link)
-    run_job(buf, indent, mark, argv, doc_cwd(buf), shell_transform, nil, sink)
+    o.sink = sink
+    run_job(buf, indent, mark, build_argv(target, cmd), o)
     return
   end
-  local mark = stage_fence(buf, trow, indent, "out", "...running...")
-  run_job(buf, indent, mark, argv, doc_cwd(buf), shell_transform)
+  local mark = stage_fence(buf, trow, indent, "out",
+    target ~= "" and ("...running on " .. target .. "...") or "...running...")
+  run_job(buf, indent, mark, build_argv(target, cmd), o)
 end
 
 -- Cancel the one-shot (`%`) job under the cursor. Each candidate is an

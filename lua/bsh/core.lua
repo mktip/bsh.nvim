@@ -156,6 +156,14 @@ local LINE_RUN = {
   list = function(buf, trow, c) listing.run_list(buf, trow, c.indent, c.target, c.body) end,
 }
 
+-- The command that runs a ```lang % block once, reading the program from stdin:
+-- python is one more language, with config.python as its interpreter.
+local function oneshot_cmd(lang)
+  local L = (config.languages or {})[lang]
+  if L then return L.cmd end
+  return config.python .. " -" -- python (and its aliases: parse_runmarker maps py -> python)
+end
+
 -- Dispatch on the current line. Returns true if something was handled, false to
 -- let <CR> fall through to its default.
 local function execute_cell(to_buf)
@@ -184,15 +192,8 @@ local function execute_cell(to_buf)
       end
     elseif fc.session then -- persistent interpreter, local or remote (`python user@host%%`)
       session.run_session(buf, fc.lang, fc.target, fc.close, fc.indent, fc.body, to_buf, fc.open)
-    elseif (config.languages or {})[fc.lang] then -- a language of yours, once: the block on its stdin
-      local eof = "__BSH_EOF_" .. vim.uv.hrtime() .. "__"
-      local cmd = config.languages[fc.lang].cmd .. " <<'" .. eof .. "'\n" .. fc.body .. "\n" .. eof
-      job.run_oneshot(buf, fc.close, fc.indent, job.build_argv(fc.target, cmd), to_buf)
-    elseif fc.target ~= "" then -- one-shot along a route: the interpreter runs at the far end
-      job.run_oneshot(buf, fc.close, fc.indent,
-        job.build_argv(fc.target, config.python .. " -c " .. vim.fn.shellescape(fc.body)), to_buf)
-    else -- one-shot local interpreter
-      job.run_oneshot(buf, fc.close, fc.indent, { config.python, "-c", fc.body }, to_buf)
+    else -- an interpreter, once (here or at the end of the route): the block on its stdin
+      job.run_oneshot(buf, fc.close, fc.indent, fc.target, oneshot_cmd(fc.lang), fc.body, to_buf)
     end
     return true
   end
@@ -427,8 +428,10 @@ function M._rule_ctx(buf, row, line, indent, to_buf, rule, selection)
     if not fence.OWNED_TAGS[tag] then fence.own_tag(tag) end
     local function clean(l) return (l:gsub("```", "'''")) end
     local mark = fence.stage_fence(buf, row, indent, tag, opts.placeholder or "...running...")
-    job.run_job(buf, indent, mark, argv, (opts.route or "") == "" and (opts.cwd or ctx.cwd) or nil,
-      function(out, err, code)
+    job.run_job(buf, indent, mark, argv, {
+      cwd = (opts.route or "") == "" and (opts.cwd or ctx.cwd) or nil,
+      line_xform = clean, decode = opts.decode, on_done = opts.on_done,
+      transform = function(out, err, code)
         local lines = {}
         for _, l in ipairs(out) do lines[#lines + 1] = clean(l) end
         if code ~= 0 then
@@ -438,7 +441,8 @@ function M._rule_ctx(buf, row, line, indent, to_buf, rule, selection)
           lines[#lines + 1] = "[exit " .. code .. "]"
         end
         return lines
-      end, clean, nil, nil, nil, opts.decode, opts.on_done)
+      end,
+    })
   end
   return ctx
 end

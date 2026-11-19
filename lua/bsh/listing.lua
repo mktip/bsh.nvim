@@ -60,25 +60,25 @@ local function run_list(buf, trow, indent, target, rest)
 
   if flags.tree then
     local mark = stage_fence(buf, trow, indent, "tree", "...listing...")
-    run_job(buf, indent, mark, build_argv(target, ls .. qpath(path)), cwd,
-      function(out, err, code)
+    run_job(buf, indent, mark, build_argv(target, ls .. qpath(path)), { cwd = cwd,
+      transform = function(out, err, code)
         if code ~= 0 then return shell_transform(out, err, code) end
         local lines = { "../" }
         vim.list_extend(lines, format_tree_level(group_entries(out), 0))
         return lines
-      end)
+      end })
     return
   end
 
   local mark = stage_fence(buf, trow, indent, "dir",
     remote and ("...listing " .. target .. "...") or "...listing...")
-  run_job(buf, indent, mark, build_argv(target, ls .. qpath(path)), cwd,
-    function(out, err, code)
+  run_job(buf, indent, mark, build_argv(target, ls .. qpath(path)), { cwd = cwd,
+    transform = function(out, err, code)
       if code ~= 0 then return shell_transform(out, err, code) end
       local lines = { "../" }
       vim.list_extend(lines, group_entries(out))
       return lines
-    end)
+    end })
 end
 
 -- `: goto <query>` : resolve <query> to the best fuzzy-matching directory under
