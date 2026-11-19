@@ -108,6 +108,12 @@ end
 -- how many body lines are there now: 1 (the placeholder) unless output was
 -- streamed in; it may be a function, resolved when the fill actually runs, so a
 -- caller whose streamed paints are still queued sees their final count.
+-- Output painted into a fence must not be able to close it: a line of the
+-- command's own (`cat README.md`, a markdown diff) starting with ``` would end
+-- the fence early and spill the rest out as prose. Swap ``` runs for '''
+-- (plain ASCII, still reads as a code fence).
+function M.safe(l) return (l:gsub("```", "'''")) end
+
 function M.fill_fence(buf, mark, indent, lines, n)
   vim.schedule(function()
     if not vim.api.nvim_buf_is_valid(buf) then return end
@@ -116,7 +122,7 @@ function M.fill_fence(buf, mark, indent, lines, n)
     local row = pos[1]
     local out = {}
     for _, l in ipairs(#lines > 0 and lines or { "(no output)" }) do
-      out[#out + 1] = indent .. l
+      out[#out + 1] = indent .. M.safe(l)
     end
     if type(n) == "function" then n = n() end
     vim.api.nvim_buf_set_lines(buf, row, row + (n or 1), false, out)

@@ -147,7 +147,7 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
     local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
     if not pos[1] then return end -- mark gone (cell re-run / cleared) -> stale
     local out = {}
-    for _, l in ipairs(lines) do out[#out + 1] = indent .. l end
+    for _, l in ipairs(lines) do out[#out + 1] = indent .. fence.safe(l) end
     vim.api.nvim_buf_set_lines(buf, pos[1], pos[1] + n, false, out)
     n = #out
   end

@@ -199,7 +199,7 @@ local function stream_partial(buf, s)
     local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, item.mark, {})
     if not pos[1] then return end -- fence gone (re-run / cleared): stale
     local out = {}
-    for _, l in ipairs(lines) do out[#out + 1] = item.indent .. l end
+    for _, l in ipairs(lines) do out[#out + 1] = item.indent .. fence.safe(l) end
     vim.api.nvim_buf_set_lines(buf, pos[1], pos[1] + item.n, false, out)
     item.n = #out
   end)

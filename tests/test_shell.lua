@@ -41,4 +41,15 @@ T["adjacent input+output fences are SEPARATE folds"] = function()
   eq(child.lua_get("vim.fn.foldclosedend(4)"), 6)
 end
 
+T["output can't close its own fence (``` is neutralised), one-shot and session"] = function()
+  local bt = string.rep(string.char(96), 3)
+  local one = [[% printf 'a\n\140\140\140\nb\n']]
+  local sess = [[%% printf 'c\n\140\140\140x\n']]
+  H.bootstrap(child, { lines = { one, "", sess, "after" } })
+  H.run(child, 3)
+  H.run(child, 1)
+  eq(H.lines(child), { one, bt .. "out", "a", "'''", "b", bt, "",
+    sess, bt .. "out", "c", "'''x", bt, "after" })
+end
+
 return T
