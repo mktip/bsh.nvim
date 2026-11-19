@@ -57,6 +57,14 @@ D.agent_thinking = false
 -- whatever you delete). llm always uses "document".
 D.agent_thread = "session"
 
+-- Which model to ask (a `[model]>` cell overrides it):
+--   false      pi / llm decide. Note a resumed `>>` conversation (pi) keeps the
+--              model it was started with, even if your default changed since.
+--   "default"  pi's own default (defaultProvider/defaultModel in
+--              ~/.pi/agent/settings.json), read on every run: `>>` follows it.
+--   "<name>"   always this model (pi: --model, llm: -m).
+D.agent_model = false
+
 for k, v in pairs(D) do
   if config[k] == nil then config[k] = v end
 end
@@ -191,6 +199,24 @@ local function environment(cwd)
     os.date("%Y-%m-%d %H:%M %Z (%A)"), cwd, vim.uv.os_gethostname())
 end
 
+-- The model to pass (string) or nil, per config.agent_model.
+local function model_arg(b)
+  local m = config.agent_model
+  if not m or m == "" then return nil end
+  if m ~= "default" then return m end
+  if b ~= "pi" then return nil end -- llm's default is already what it uses
+  local dir = vim.env.PI_CODING_AGENT_DIR or (vim.env.HOME .. "/.pi/agent")
+  local f = io.open(dir .. "/settings.json", "r")
+  if not f then return nil end
+  local ok, st = pcall(vim.json.decode, f:read("*a"))
+  f:close()
+  if not (ok and type(st) == "table" and type(st.defaultModel) == "string") then return nil end
+  if type(st.defaultProvider) == "string" and st.defaultProvider ~= "" then
+    return st.defaultProvider .. "/" .. st.defaultModel
+  end
+  return st.defaultModel
+end
+
 local function backend()
   local b = config.agent
   if b == "auto" then b = vim.fn.executable("pi") == 1 and "pi" or "llm" end
@@ -270,7 +296,8 @@ function M.run(ctx, c)
       "--append-system-prompt", config.agent_prompt,
       "--append-system-prompt", c.bang and config.agent_prompt_run or config.agent_prompt_propose,
       "--append-system-prompt", environment(ctx.cwd) }
-    if c.template then vim.list_extend(argv, { "--model", c.template }) end
+    local model = c.template or model_arg("pi")
+    if model then vim.list_extend(argv, { "--model", model }) end
     if config.agent_thinking then vim.list_extend(argv, { "--thinking", config.agent_thinking }) end
     if session then
       vim.list_extend(argv, { "--session-id", session_id(buf) })
@@ -281,6 +308,8 @@ function M.run(ctx, c)
     decode = M.decode_pi
   else
     argv = { "llm", "-t", c.template or config.agent_template, "--chain-limit", "15" }
+    local model = model_arg("llm")
+    if model and not c.template then vim.list_extend(argv, { "-m", model }) end
     if c.bang then argv[#argv + 1] = "--td" end
     argv[#argv + 1] = prompt
   end

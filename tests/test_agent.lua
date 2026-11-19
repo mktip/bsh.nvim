@@ -149,4 +149,30 @@ T["`>>` joins a per-file pi session (same id each time, survives deleting cells)
   eq(child.lua_get("vim.b.bsh_agent_salt ~= nil"), true)
 end
 
+T["agent_model: false (pi decides), a name, or pi's own default"] = function()
+  boot({ "> q", "[cell-model]> q" })
+  local function args(row)
+    child.lua("vim.env.FAKE_PI_ARGS = '1'")
+    H.run(child, row)
+    return table.concat(child.lua_get("vim.api.nvim_buf_get_lines(0, 0, -1, false)"), "\n")
+  end
+  local function model_of(out, row)
+    local line = vim.split(out, "\n")[row + 2] or ""
+    return line:match("%-%-model (%S+)") or "none"
+  end
+  eq(model_of(args(1), 1), "none")
+  child.lua("require('bsh.config').agent_model = 'qwen'")
+  eq(model_of(args(1), 1), "qwen")
+  -- "default": read from pi's settings.json
+  child.lua([[
+    local d = vim.fn.tempname(); vim.fn.mkdir(d, 'p')
+    vim.fn.writefile({ vim.json.encode({ defaultProvider = 'simurgh', defaultModel = 'qwen-next' }) }, d .. '/settings.json')
+    vim.env.PI_CODING_AGENT_DIR = d
+    require('bsh.config').agent_model = 'default'
+  ]])
+  eq(model_of(args(1), 1), "simurgh/qwen-next")
+  -- a [model] cell still wins
+  eq(model_of(args(5), 5), "cell-model")
+end
+
 return T

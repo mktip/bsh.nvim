@@ -253,6 +253,10 @@ output_max_lines    Inline output cap, `false` for none. Default `2000`.
 agent               `"auto"`, `"pi"`, `"llm"` or `false` (no `>` cells).
                     Default `"auto"`.
 agent_thread        `"session"` or `"document"`, see |bsh-agent|.
+agent_model         `false` (pi or llm decides; a resumed `>>` conversation
+                    keeps the model it started with), `"default"` (pi's
+                    current defaultModel, read from its settings.json on
+                    every run), or a model name. `[model]>` overrides it.
 agent_tools         pi tools for `>`. Default `"read,grep,find,ls"`.
 agent_tools_write   pi tools for `>!`.
 agent_template      llm template. Default `"web"`.

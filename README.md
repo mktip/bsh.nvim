@@ -190,7 +190,10 @@ It uses [pi](https://pi.dev) when it's installed, otherwise the
   `!` (`>!`, `>>!`) to let it run commands and edit files.
 - Tool calls show up as `[tool] arg` lines and thinking as `| ` lines (hide them
   with `<localleader>t`).
-- `[model]> question` picks a model (pi) or template (llm).
+- `[model]> question` picks a model (pi) or template (llm). A pi conversation
+  remembers the model it started with, so a `>>` keeps using it even after you
+  change your default; `agent_model = "default"` makes every cell use pi's
+  current default instead (or set a model name).
 - To hand it part of the file, visually select the lines ending on the `>` cell
   and press `<CR>`.
 
@@ -313,6 +316,7 @@ require("bsh").setup({
   output_max_lines = 2000,  -- inline output cap (false = none); g<CR> has no cap
   agent = "auto",           -- "pi", "llm", "auto" (pi if installed), or false: no `>` cells
   agent_thread = "session", -- or "document": `>>` re-reads the cells above it
+  agent_model = false,      -- false: pi decides; "default": pi's current default; or a name
   agent_tools = "read,grep,find,ls",                         -- pi, for `>`
   agent_tools_write = "read,grep,find,ls,bash,edit,write",   -- pi, for `>!`
   agent_thinking = false,   -- pi --thinking level: "low", "high", ...
