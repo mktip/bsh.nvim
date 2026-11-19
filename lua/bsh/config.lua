@@ -61,6 +61,11 @@ M.output_max_lines = 2000
 -- options (agent, agent_thread, agent_tools, ...) live there, and are set like
 -- any other. `agent = false` turns `>` cells off.
 
+-- How long a cell took and how it ended, as dim text at the end of its trigger
+-- line (`running 4s…`, then `1.3s · ok` / `0.2s · exit 1`). Not written into
+-- the file. Listings only show it when slow or failed. false = off.
+M.status = true
+
 -- ANSI escapes in output (colours from `ls --color`, `bsc_quota`, pytest...):
 -- the buffer always gets clean text (a saved file never holds escape codes);
 -- "color" shows the colours/bold/underline as highlights over it, "strip" drops

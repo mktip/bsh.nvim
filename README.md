@@ -59,7 +59,9 @@ in live, and every result fence folds to a one-line summary (`za`).
 edit the cell and press `<CR>`: its old result is replaced in place. Output is
 ordinary text you can edit too, but a re-run overwrites it. Inline output stops
 after 2000 lines (`output_max_lines`); use `g<CR>` for anything bigger.
-Colour codes in output are shown as highlights and kept out of the text, so a
+While a cell runs, a dim `running 4s…` sits at the end of its line, then
+`1.3s · ok` or `0.2s · exit 1` (not saved into the file; `status = false` hides
+it). Colour codes in output are shown as highlights and kept out of the text, so a
 saved file stays clean (`ansi = "strip"` drops the colours, `false` keeps the
 raw codes).
 
@@ -327,6 +329,7 @@ require("bsh").setup({
   agent_hide_thinking = false,  -- start with thinking folded away
   otter = "auto",           -- LSP in python fences when otter.nvim is installed
   ansi = "color",           -- colours in output as highlights; "strip", or false for raw codes
+  status = true,            -- elapsed time / exit status at the end of a cell's line
   complete = true,          -- on-request completion from where the cell runs
   history = true,           -- per-route history: <C-p>/<C-n> on a prompt, :BshHistory
   history_shell = true,     -- ...including the machine's own shell history

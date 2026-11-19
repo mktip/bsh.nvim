@@ -271,6 +271,10 @@ scaffold_lang       Language for `name!` scaffolds: `"sh"` or `"python"`.
 menu_exit           Default `150`.
 cell_exit           Default `151`.
 prompt_badge        Show a session cell's cwd at end of line. Default `false`.
+status              Elapsed time / exit status as dim text at the end of a
+                    cell's line (`running 4s…`, `1.3s · ok`, `0.2s · exit 1`).
+                    Not saved. Listings show it only when slow or failed.
+                    Default `true`.
 ansi                ANSI escapes in output. `"color"`: clean text, colours
                     shown as highlights. `"strip"`: clean text, no colours.
                     `false`: raw codes. Default `"color"`.

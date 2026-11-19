@@ -159,6 +159,16 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
     while #lines > 0 and lines[#lines] == "" do table.remove(lines) end
     return max and fence.cap(lines, dropped()) or lines
   end
+  -- elapsed time / exit status on the trigger line (two rows above the body:
+  -- trigger, ```tag, body); listings only show it when slow or failed
+  local timing = { done = function() end }
+  do
+    local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
+    if pos[1] and pos[1] >= 2 then
+      local tag = (vim.api.nvim_buf_get_lines(buf, pos[1] - 1, pos[1], false)[1] or ""):match("```(%S+)")
+      timing = require("bsh.status").start(buf, pos[1] - 2, { quiet = tag == "dir" or tag == "tree" })
+    end
+  end
   local job = vim.fn.jobstart(argv, {
     cwd = cwd,
     stderr_buffered = true,
@@ -199,6 +209,7 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
         -- `[cancelled]` note, and skip the cell-emit/retag paths (a killed command
         -- hasn't legitimately "declared" anything by its signal-derived exit code).
         if fence.take_cancelled(buf, mark) then
+          timing.done(code, "cancelled")
           final[#final + 1] = "[cancelled]"
           paint(final, true, code)
           pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
@@ -208,6 +219,7 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
         -- inline only: a command can EMIT A CELL -- swap its trigger + fence for a
         -- single line of cell text (e.g. a `docker@<id>%% ` session cell). Takes
         -- precedence over painting; the fence/extmark are removed in the process.
+        timing.done(code)
         if on_cell and not sink and vim.api.nvim_buf_is_valid(buf) then
           local cell = on_cell(code, final)
           local pos = cell and vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
@@ -253,6 +265,8 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
   if job > 0 then
     inflight[buf][mark] = job
     pcall(vim.fn.chanclose, job, "stdin")
+  else
+    timing.done(nil, "couldn't start")
   end
 end
 

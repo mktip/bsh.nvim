@@ -208,6 +208,8 @@ local function sess_pump(buf, key)
   local item = table.remove(s.queue, 1)
   if not item then return end
   s.busy, s.current = true, item
+  -- timed from when it actually starts (not while it waits behind another cell)
+  item.timing = require("bsh.status").start(buf, item.prow or -1)
   s.spec.send(s, item.cmd)
 end
 
@@ -255,6 +257,7 @@ local function sess_start(buf, lang, target)
         s.busy, s.current = false, nil
         if item then
           item.done = true -- queued streaming paints for it become no-ops
+          if item.timing then item.timing.done(tonumber(rc)) end
           local lines = body_lines(body)
           if not item.sink then lines = fence.cap(lines) end -- inline: keep the head
           if tonumber(rc) ~= 0 then lines[#lines + 1] = "[exit " .. rc .. "]" end
@@ -300,6 +303,7 @@ local function sess_start(buf, lang, target)
           if i == 1 then vim.list_extend(lines, s.err) end
           lines[#lines + 1] = "[session exited " .. code .. "]"
           it.done = true
+          if it.timing then it.timing.done(code, "session exited") end
           if it.sink then
             it.sink(lines, true, code)
             pcall(vim.api.nvim_buf_del_extmark, buf, ns, it.mark)
@@ -402,6 +406,7 @@ function M.reset_session(buf, lang, target)
   if s.current then pending[#pending + 1] = s.current end
   for _, it in ipairs(s.queue) do pending[#pending + 1] = it end
   for _, it in ipairs(pending) do
+    if it.timing then it.timing.done(130, "reset") end
     if it.sink then
       it.sink({ "[session reset]" }, true, 130)
       pcall(vim.api.nvim_buf_del_extmark, buf, ns, it.mark)
