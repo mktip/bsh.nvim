@@ -43,9 +43,14 @@ local SUBFOLDS = {}
 
 -- Make `tag` a result fence bsh owns (a re-run replaces it, io/ao select it,
 -- it folds), optionally with nested folds (see bsh.cell rules: `fold`).
+local fold_cache = {} -- [buf] = { tick, levels } (see M.foldexpr)
+
 function M.own_tag(tag, fold)
   OWNED_TAGS[tag] = true
-  SUBFOLDS[tag] = fold
+  if SUBFOLDS[tag] ~= fold then
+    SUBFOLDS[tag] = fold
+    fold_cache = {} -- new nested folds: levels change without an edit
+  end
 end
 function M.fence_range(buf, trow, indent, tag)
   local open = trow + 1
@@ -189,21 +194,44 @@ local function subfold(tag, line)
   if f and f.test(line) then return f end
 end
 
-function M.foldexpr(lnum)
-  local line = vim.fn.getline(lnum)
-  if line:match(OPEN) then return ">1" end   -- opener starts a fold
-  if line:match(FENCE) then return "<1" end -- closer ends it
-  for l = lnum - 1, 1, -1 do
-    local s = vim.fn.getline(l)
-    if s:match(OPEN) then -- inside a body
-      local tag = s:match("^%s*```(%S+)")
-      if subfold(tag, line) then return subfold(tag, vim.fn.getline(lnum - 1)) and "2" or ">2" end
-      return "1"
+-- Every line's fold level in one top-down pass (a line is inside a body when the
+-- nearest fence line above it is an opener).
+local function fold_levels(buf)
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local levels, tag = {}, nil -- tag: the open fence's tag, nil = outside
+  for i, line in ipairs(lines) do
+    if line:match(OPEN) then -- opener starts a fold
+      levels[i], tag = ">1", line:match("^%s*```(%S+)")
+    elseif line:match(FENCE) then -- closer ends it
+      levels[i], tag = "<1", nil
+    elseif tag then -- inside a body
+      if subfold(tag, line) then
+        levels[i] = subfold(tag, lines[i - 1] or "") and "2" or ">2"
+      else
+        levels[i] = "1"
+      end
+    else
+      levels[i] = "0"
     end
-    if s:match(FENCE) then return "0" end -- a closer above
   end
-  return "0"
+  return levels
 end
+
+-- Vim asks for each line in turn; computing them all once per change (keyed on
+-- changedtick) keeps that linear -- scanning upward per line was quadratic, and
+-- took seconds to open a long file.
+function M.foldexpr(lnum)
+  local buf = vim.api.nvim_get_current_buf()
+  local tick = vim.api.nvim_buf_get_changedtick(buf)
+  local c = fold_cache[buf]
+  if not c or c.tick ~= tick then
+    c = { tick = tick, levels = fold_levels(buf) }
+    fold_cache[buf] = c
+  end
+  return c.levels[lnum] or "0"
+end
+
+function M.forget_folds(buf) fold_cache[buf] = nil end
 
 -- Collapsed cells read as `  + out (N lines)` / `  + dir (N entries)`
 -- (N = body lines, fences excluded; tag taken from the opening fence).

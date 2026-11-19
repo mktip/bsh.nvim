@@ -786,7 +786,10 @@ M.config = function()
   require("bsh.remote").setup()
   -- tear a buffer's persistent `%%` shell down when the buffer is wiped.
   vim.api.nvim_create_autocmd("BufWipeout", {
-    callback = function(args) M.stop_session(args.buf) end,
+    callback = function(args)
+      M.stop_session(args.buf)
+      fence.forget_folds(args.buf)
+    end,
   })
 
   -- :Bsh  -> scratch lab buffer to play in.
