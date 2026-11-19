@@ -225,7 +225,9 @@ local function sess_start(buf, lang, target)
     busy = false,
     queue = {},
     err = {},
-    token = string.format("%08x", math.random(0, 0xffffffff))
+    -- OS randomness: math.random is unseeded, so it gave the same token on every
+    -- start (and touching its global seed would affect other plugins)
+    token = (vim.uv.random(8):gsub(".", function(c) return string.format("%02x", c:byte()) end)),
   }
   local argv = spec.argv(s.token, target)
   if vim.fn.executable(argv[1]) ~= 1 then
