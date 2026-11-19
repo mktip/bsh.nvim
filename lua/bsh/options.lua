@@ -8,12 +8,29 @@ local api = {}
 -- options, e.g. the agent's, load with the engine, after your setup() ran)
 local pending = {}
 
+-- An option takes the type of its default, or false (off). A default of false
+-- or true is a switch that may also take a value (agent_memory = "file"); these
+-- take one more type besides their default's.
+local ALSO = { otter = "boolean" }
+
+local function bad_type(k, v)
+  local d = config[k]
+  if v == false or type(d) == "boolean" or type(v) == type(d) or type(v) == ALSO[k] then return nil end
+  return ("bsh: option '%s' should be a %s, not a %s (%s); kept the default"):format(
+    k, type(d), type(v), vim.inspect(v))
+end
+
 -- Set one option; a table merges into a table default (so adding one transport
 -- keeps the rest). Returns false when no default with that name exists (yet).
 function api.set(k, v)
   if config[k] == nil then
     pending[k] = v
     return false
+  end
+  local err = bad_type(k, v)
+  if err then
+    vim.notify(err, vim.log.levels.WARN)
+    return true
   end
   if type(v) == "table" and type(config[k]) == "table" and not vim.islist(v) then
     config[k] = vim.tbl_extend("force", config[k], v)

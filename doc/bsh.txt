@@ -236,6 +236,8 @@ the current directory: `bsh git.undo`. Put it on $PATH to use your commands in
 <
 Table options (like `transports`) are merged with the defaults. Options can
 also be set directly: `require("bsh").python = "python3.12"`.
+An unknown name, or a value of the wrong type (`false` always turns an option
+off), is refused with a warning.
 
 marker              Run marker. Default `"%"`.
 rules               Your own cell kinds, tried before the built-in ones,     *bsh-rules*
@@ -287,9 +289,15 @@ agent_thinking      pi `--thinking` level, or `false` for pi's default.
 agent_show_thinking Show thinking lines. Default `true`.
 agent_hide_thinking Start with thinking folded. Default `false`.
 agent_thinking_prefix  Prefix of thinking lines. Default `"| "`.
-agent_max_context   Max characters `>>` sends in document mode.
+agent_max_context   Max characters of thread `>>` sends (the oldest is cut).
+                    Default `60000`.
+agent_prompt        pi: appended to its system prompt (replies suit a buffer).
+agent_prompt_propose  ...plus this for `>`: look with read-only tools, put
+                    commands in a code block for you to run.
+agent_prompt_run    ...or this for `>!`: run commands with the bash tool.
 otter               LSP in python fences via otter.nvim: `"auto"`, `true`,
                     `false`. Default `"auto"`.
+otter_languages     Languages otter activates in fences. Default `{ "python" }`.
 scaffold_lang       Language for `name!` scaffolds: `"sh"` or `"python"`.
 menu_exit           Default `150`.
 cell_exit           Default `151`.
