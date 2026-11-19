@@ -74,9 +74,7 @@ D.agent_thread = false
 --   "<name>"   always this model (pi: --model, llm: -m).
 D.agent_model = false
 
-for k, v in pairs(D) do
-  if config[k] == nil then config[k] = v end
-end
+require("bsh.options").defaults(D)
 
 -- `> q`, `>> q`, `[model]>> q`, each with an optional `!` after the arrows.
 -- Returns a cell table, or nil (also when `agent = false`).

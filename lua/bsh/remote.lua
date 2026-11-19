@@ -101,20 +101,11 @@ function M.open(route, path)
   vim.cmd("edit " .. vim.fn.fnameescape(M.bufname(route, path)))
 end
 
-function M.setup()
-  local group = vim.api.nvim_create_augroup("bsh_remote", { clear = true })
-  vim.api.nvim_create_autocmd("BufReadCmd", {
-    group = group, pattern = "bsh://*:*",
-    callback = function(args) M.read(args.buf) end,
-  })
-  vim.api.nvim_create_autocmd("BufWriteCmd", {
-    group = group, pattern = "bsh://*:*",
-    callback = function(args) M.write(args.buf) end,
-  })
-  vim.api.nvim_create_autocmd("BufWipeout", {
-    group = group, pattern = "bsh://*:*",
-    callback = function(args) last[args.buf] = nil end,
-  })
-end
+-- (BufReadCmd / BufWriteCmd for bsh://<route>:<path> are set up in init.lua)
+vim.api.nvim_create_autocmd("BufWipeout", {
+  group = vim.api.nvim_create_augroup("bsh_remote", { clear = true }),
+  pattern = "bsh://*:*",
+  callback = function(args) last[args.buf] = nil end,
+})
 
 return M
