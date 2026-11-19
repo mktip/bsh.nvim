@@ -47,7 +47,7 @@ M.transports = {
 -- cell, output below the line), false to let the line fall through, or nothing
 -- once it has handled the line itself (often via ctx.run, which streams a
 -- command into the cell's own fence). Optional: prompt, tag, fold, attach.
--- See bsh.cell (the rule fields), bsh._rule_ctx (ctx), and the `>` agent in
+-- See bsh.cell (the rule fields), bsh.core._rule_ctx (ctx), and the `>` agent in
 -- lua/bsh/contrib/agent.lua, written entirely this way.
 --   rules = { { match = "^%s*(%u+%-%d+)%s*$", run = function(_, id)
 --     vim.ui.open("https://jira.example.com/browse/" .. id) end } }

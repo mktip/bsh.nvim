@@ -241,7 +241,7 @@ function M.cycle(step)
   if not (st and st.row == row and st.shown == line) then
     local prefix, _, target = prompt_parts(line)
     if not prefix or col < #prefix then return false end
-    if require("bsh")._input_fence_at(buf, row) then return false end
+    if require("bsh.cell").input_fence_at(buf, row) then return false end
     st = { row = row, prefix = prefix, typed = line:sub(#prefix + 1, col), orig = line,
       idx = 0, list = {}, loading = true }
     state[buf] = st
@@ -319,7 +319,7 @@ function M.browse()
       vim.api.nvim_win_set_cursor(owin, { orow, #prefix + #text })
       vim.cmd("startinsert!")
     else -- a new prompt on that route, below the cell (or the cursor line)
-      require("bsh")._open_prompt_below(obuf, trow, target .. config.marker .. " ", text)
+      require("bsh.edit").open_prompt_below(obuf, trow, target .. config.marker .. " ", text)
     end
   end, { buffer = hbuf, desc = "bsh: use this command" })
 end

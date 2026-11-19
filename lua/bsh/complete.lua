@@ -62,7 +62,7 @@ function M.context(buf, row, col)
   local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
   local ctx = M.line_context(line, col)
   if not ctx then
-    local fc = require("bsh")._input_fence_at(buf, row)
+    local fc = require("bsh.cell").input_fence_at(buf, row)
     if not (fc and fc.lang == "sh" and row > fc.open and row < fc.close) then return nil end
     ctx = M.word_context(line:sub(1, col))
     ctx.target, ctx.session = fc.target, fc.session

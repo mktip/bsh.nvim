@@ -7,6 +7,8 @@ local M = {}
 local fence = require("bsh.fence")
 local job = require("bsh.job")
 local config = require("bsh.config")
+local cell = require("bsh.cell")
+local util = require("bsh.util")
 local ns, inflight = fence.ns, fence.inflight
 local stage_fence, fill_fence = fence.stage_fence, fence.fill_fence
 local doc_cwd, existing_log_link, begin_buffer_run = job.doc_cwd, job.existing_log_link, job.begin_buffer_run
@@ -527,6 +529,138 @@ function M.stop_session(buf)
       if s.job then pcall(vim.fn.jobstop, s.job) end
     end
     sessions[buf] = nil
+  end
+end
+
+-- The commands on the session under the cursor: :BshReplay, :BshCancel, :BshReset.
+
+-- If the cursor sits on a persistent-session cell, return its { lang, target }.
+-- Two cell shapes carry a session: a multiline input fence with the `%%` suffix
+-- (```python %%```, ```%%```) and the inline doubled marker (`%% cmd`,
+-- `user@host%% cmd`). Anything else (one-shots, prose, output fences) -> nil.
+local function classify_session(buf, row)
+  local fc = cell.input_fence_at(buf, row)
+  if fc and fc.session then return { lang = fc.lang, target = fc.target } end
+  local c = cell.parse(vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or "")
+  if c and c.kind == "shell" and c.session then return { lang = "sh", target = c.target } end
+  return nil
+end
+
+local function session_label(c)
+  return (c.target ~= "" and (c.target .. " ") or "") .. c.lang
+end
+
+-- Collect, in DOCUMENT ORDER, every session cell at or above `upto` whose
+-- (lang, target) matches `want` -- the units that, replayed in sequence, rebuild
+-- the state a far-down cell depends on. Two shapes carry a session: a ```lang %%``
+-- input fence and an inline `%%`/`target%% cmd` line (always `sh`). We walk
+-- top-down, skipping each fenced block as a whole (by its closing ```), so an
+-- ```out result body that happens to contain a `%`-looking line is never mistaken
+-- for a trigger. Each entry mirrors the args run_session takes.
+local function collect_session_cells(buf, upto, want)
+  local total = vim.api.nvim_buf_line_count(buf)
+  local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
+  local cells, r = {}, 0
+  while r <= upto and r < total do
+    local line = gl(r)
+    if line:match("^%s*```%S") then
+      -- an opening fence: find its closer and skip the whole block either way
+      local close = total - 1
+      for rr = r + 1, total - 1 do
+        if gl(rr):match("^%s*```%s*$") then close = rr; break end
+      end
+      local lang, target, sess = util.parse_runmarker(vim.trim(line:match("^%s*```(.*)$") or ""), config.marker)
+      if lang and sess and lang == want.lang and target == want.target then
+        cells[#cells + 1] = {
+          trow = close, prow = r, indent = line:match("^(%s*)"),
+          cmd = table.concat(vim.api.nvim_buf_get_lines(buf, r + 1, close, false), "\n"),
+        }
+      end
+      r = close + 1
+    else
+      -- an inline session line is always `sh`; only collect when that's wanted
+      local c = cell.parse(line)
+      if c and c.kind == "shell" and c.session and want.lang == "sh" and c.target == want.target then
+        cells[#cells + 1] = { trow = r, prow = r, indent = c.indent, cmd = c.body }
+      end
+      r = r + 1
+    end
+  end
+  return cells
+end
+
+-- :BshReplay / <localleader>r — replay this session from the top THROUGH the cell
+-- under the cursor, into a FRESH interpreter. We reset the session first (so the
+-- replay starts from clean state) then enqueue every matching cell in document
+-- order; M.lua's FIFO pump runs them one after another, each filling its own
+-- fence as it completes. The point: after a :BshReset (or reopening the file) a
+-- far-down cell depends on imports/vars/`cd` from earlier cells that no longer
+-- live in the interpreter -- this rebuilds them in one keystroke.
+function M.replay_here()
+  local buf = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local c = classify_session(buf, row)
+  if not c then
+    vim.notify("bsh: put the cursor on a session (%% / ```%% ) cell to replay", vim.log.levels.WARN)
+    return
+  end
+  local cells = collect_session_cells(buf, row, c)
+  if #cells == 0 then return end
+  M.reset_session(buf, c.lang, c.target) -- replay into a clean interpreter
+  for _, it in ipairs(cells) do
+    M.run_session(buf, c.lang, c.target, it.trow, it.indent, it.cmd, false, it.prow)
+  end
+  vim.notify(("bsh: replaying %d %s cell%s"):format(#cells, session_label(c), #cells == 1 and "" or "s"))
+end
+
+-- <C-c> / :BshCancel — cancel the running cell under the cursor. A one-shot
+-- (`%`) is stopped outright; a session cell's running command is INTERRUPTED
+-- (SIGINT) so the session itself survives. Falls back to the sole busy session in
+-- the buffer when the cursor isn't on a recognisable cell.
+function M.cancel_here()
+  local buf = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  if job.cancel_at(buf, row) then return end
+  local c = classify_session(buf, row)
+  if c and M.interrupt_session(buf, c.lang, c.target) then
+    vim.notify("bsh: interrupted " .. session_label(c) .. " session (SIGINT)")
+    return
+  end
+  local busy = {}
+  for _, s in ipairs(M.list_sessions(buf)) do if s.busy then busy[#busy + 1] = s end end
+  if #busy == 1 and M.interrupt_session(buf, busy[1].lang, busy[1].target) then
+    vim.notify("bsh: interrupted " .. session_label(busy[1]) .. " session (SIGINT)")
+    return
+  end
+  vim.notify("bsh: no running cell under the cursor", vim.log.levels.WARN)
+end
+
+-- <localleader>R / :BshReset[!] — reset (restart) the session for the cell under
+-- the cursor, so the next run gets a fresh interpreter. `!` resets every session
+-- in the buffer. With one session and an ambiguous cursor we reset it anyway;
+-- with several we refuse and point at `!` rather than guess.
+function M.reset_here(all)
+  local buf = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  if all then
+    local n = M.reset_all(buf)
+    vim.notify("bsh: reset " .. n .. " session" .. (n == 1 and "" or "s"))
+    return
+  end
+  local c = classify_session(buf, row)
+  if c and M.reset_session(buf, c.lang, c.target) then
+    vim.notify("bsh: reset " .. session_label(c) .. " session")
+    return
+  end
+  local list = M.list_sessions(buf)
+  if #list == 0 then
+    vim.notify("bsh: no session here", vim.log.levels.WARN)
+  elseif #list == 1 then
+    M.reset_session(buf, list[1].lang, list[1].target)
+    vim.notify("bsh: reset " .. session_label(list[1]) .. " session")
+  else
+    vim.notify("bsh: multiple sessions — put the cursor on a session cell, or :BshReset! to reset all",
+      vim.log.levels.WARN)
   end
 end
 

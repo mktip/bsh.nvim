@@ -14,7 +14,8 @@
 --           any `word ...` line parses as one; it's a cell only if the name
 --           resolves under $BSH_HOME (bsh.namespace decides).
 -- Multiline input fences (```python %%) and positions inside result fences are
--- not line cells; the dispatcher handles those first (see bsh.init).
+-- not line cells; M.input_fence_at finds the first, the dispatcher (bsh.core)
+-- handles both before line cells.
 --
 -- Cell kinds that aren't built into the grammar -- yours (config.rules) and the
 -- bundled ones written the same way (bsh.contrib.*, e.g. the `>` agent) -- are
@@ -22,6 +23,7 @@
 local M = {}
 
 local config = require("bsh.config")
+local util = require("bsh.util")
 
 local function shell(line)
   local m = vim.pesc(config.marker)
@@ -133,5 +135,43 @@ function M.rule_for(line)
   end
 end
 M.user_rule = M.rule_for -- (older name)
+
+-- A MULTILINE input cell is a fenced code block whose info-string parses as a run
+-- marker (see parse_runmarker). If the cursor sits anywhere inside such a block,
+-- return its open/close rows, indent, language, remote target, session flag, and
+-- the joined body; else nil.
+function M.input_fence_at(buf, row)
+  local total = vim.api.nvim_buf_line_count(buf)
+  local function gl(r) return vim.api.nvim_buf_get_lines(buf, r, r + 1, false)[1] or "" end
+  -- find the opening fence at/above the cursor; bail if we hit a bare ``` first
+  -- (that means we're below a closed block, not inside an open one)
+  local openr
+  for r = row, 0, -1 do
+    local l = gl(r)
+    if l:match("^%s*```%s*$") then return nil end
+    if l:match("^%s*```%S") then
+      openr = r; break
+    end
+  end
+  if not openr then return nil end
+  local lang, target, session = util.parse_runmarker(vim.trim(gl(openr):match("^%s*```(.*)$") or ""), config.marker)
+  if not lang then return nil end -- e.g. ```out / ```python (no marker) -> inert
+  local closer
+  for r = openr + 1, total - 1 do
+    if gl(r):match("^%s*```%s*$") then
+      closer = r; break
+    end
+  end
+  if not closer or row > closer then return nil end
+  return {
+    open = openr,
+    close = closer,
+    indent = gl(openr):match("^(%s*)"),
+    lang = lang,
+    target = target,
+    session = session,
+    body = table.concat(vim.api.nvim_buf_get_lines(buf, openr + 1, closer, false), "\n"),
+  }
+end
 
 return M
