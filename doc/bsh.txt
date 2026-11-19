@@ -271,6 +271,9 @@ scaffold_lang       Language for `name!` scaffolds: `"sh"` or `"python"`.
 menu_exit           Default `150`.
 cell_exit           Default `151`.
 prompt_badge        Show a session cell's cwd at end of line. Default `false`.
+ansi                ANSI escapes in output. `"color"`: clean text, colours
+                    shown as highlights. `"strip"`: clean text, no colours.
+                    `false`: raw codes. Default `"color"`.
 complete            Completion in shell cells, see |bsh-complete|. Default
                     `true`.
 history             Per-route history, see |bsh-history|. Default `true`.

@@ -114,18 +114,26 @@ end
 -- (plain ASCII, still reads as a code fence).
 function M.safe(l) return (l:gsub("```", "'''")) end
 
+-- Paint output `lines` over rows [row, row + n) of `buf` (each prefixed with
+-- `indent`): ANSI escapes cleaned out of the text and shown as highlights (see
+-- bsh.ansi), ``` neutralised. Returns how many rows it now occupies.
+function M.paint(buf, row, n, indent, lines)
+  local clean, highlight = require("bsh.ansi").prepare(lines)
+  local out = {}
+  for i, l in ipairs(clean) do out[i] = indent .. M.safe(l) end
+  vim.api.nvim_buf_set_lines(buf, row, row + n, false, out)
+  highlight(buf, row, #indent)
+  return #out
+end
+
 function M.fill_fence(buf, mark, indent, lines, n)
   vim.schedule(function()
     if not vim.api.nvim_buf_is_valid(buf) then return end
     local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
     if not pos[1] then return end
     local row = pos[1]
-    local out = {}
-    for _, l in ipairs(#lines > 0 and lines or { "(no output)" }) do
-      out[#out + 1] = indent .. M.safe(l)
-    end
     if type(n) == "function" then n = n() end
-    vim.api.nvim_buf_set_lines(buf, row, row + (n or 1), false, out)
+    M.paint(buf, row, n or 1, indent, #lines > 0 and lines or { "(no output)" })
     pcall(vim.api.nvim_buf_del_extmark, buf, ns, mark)
     if inflight[buf] then
       inflight[buf][mark] = nil

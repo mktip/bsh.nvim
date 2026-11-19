@@ -61,6 +61,13 @@ M.output_max_lines = 2000
 -- options (agent, agent_thread, agent_tools, ...) live there, and are set like
 -- any other. `agent = false` turns `>` cells off.
 
+-- ANSI escapes in output (colours from `ls --color`, `bsc_quota`, pytest...):
+-- the buffer always gets clean text (a saved file never holds escape codes);
+-- "color" shows the colours/bold/underline as highlights over it, "strip" drops
+-- them, false leaves the raw escapes in. Cursor moves, screen clears and
+-- hyperlink codes are removed in both "color" and "strip".
+M.ansi = "color"
+
 -- Completion in shell cells, from wherever the cell runs (commands from that
 -- route's PATH, paths from its cwd). Only on request: <C-x><C-o>, nvim-cmp's
 -- trigger (a `bsh` source is added to bsh buffers), or <Tab> without nvim-cmp.

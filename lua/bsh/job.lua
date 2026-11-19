@@ -148,10 +148,7 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
     if not vim.api.nvim_buf_is_valid(buf) then return end
     local pos = vim.api.nvim_buf_get_extmark_by_id(buf, ns, mark, {})
     if not pos[1] then return end -- mark gone (cell re-run / cleared) -> stale
-    local out = {}
-    for _, l in ipairs(lines) do out[#out + 1] = indent .. fence.safe(l) end
-    vim.api.nvim_buf_set_lines(buf, pos[1], pos[1] + n, false, out)
-    n = #out
+    n = fence.paint(buf, pos[1], n, indent, lines)
   end
   local paint = sink or inline_paint
   local function split_out()
@@ -300,7 +297,9 @@ end
 local function buffer_sink(buf, mark, indent, sidebuf, link)
   return function(lines, final, code)
     if vim.api.nvim_buf_is_valid(sidebuf) then
-      vim.api.nvim_buf_set_lines(sidebuf, 0, -1, false, lines)
+      local clean, highlight = require("bsh.ansi").prepare(lines)
+      vim.api.nvim_buf_set_lines(sidebuf, 0, -1, false, clean)
+      highlight(sidebuf, 0, 0)
       for _, w in ipairs(vim.fn.win_findbuf(sidebuf)) do -- follow to bottom
         pcall(vim.api.nvim_win_set_cursor, w, { math.max(1, #lines), 0 })
       end
