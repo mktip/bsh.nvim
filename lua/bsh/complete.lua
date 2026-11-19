@@ -85,7 +85,7 @@ local function run(target, cwd, script, cb)
   -- locally the cwd is the job's own; over a route, cd there first
   if target ~= "" and cwd then cmd = "cd " .. util.qpath(cwd) .. " 2>/dev/null; " .. cmd end
   local ok, err = pcall(vim.system, job.build_argv(target, cmd),
-    { cwd = target == "" and cwd or nil, text = true, timeout = 15000, stdin = false },
+    { cwd = target == "" and cwd or nil, text = true, timeout = 15000 },
     function(r)
       local lines, seen = {}, false
       for l in ((r.stdout or "") .. ""):gmatch("[^\r\n]+") do

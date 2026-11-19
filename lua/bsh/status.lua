@@ -38,7 +38,7 @@ function M.start(buf, row, opts)
   local id = vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { invalidate = true, undo_restore = false })
   local t0 = vim.uv.hrtime()
   local function elapsed() return (vim.uv.hrtime() - t0) / 1e9 end
-  local timer = vim.uv.new_timer()
+  local timer = assert(vim.uv.new_timer())
   timer:start(1000, 1000, vim.schedule_wrap(function()
     if not vim.api.nvim_buf_is_valid(buf) then return timer:stop() end
     local r = row_of(buf, id)

@@ -181,7 +181,7 @@ local function run_job(buf, indent, mark, argv, cwd, transform, line_xform, sink
       end
       acc = acc .. table.concat(d, "\n")
       if max then
-        local pos, seen = 0, 0 -- find the end of line `max`
+        local pos, seen = 0, 0 ---@type integer?, integer -- find the end of line `max`
         while seen < max do
           pos = acc:find("\n", pos + 1, true)
           if not pos then break end

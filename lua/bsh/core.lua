@@ -136,9 +136,10 @@ local function open_listing_entry(buf, trow, line)
       -- a namespace listing's trigger carries a trailing dot (`demo.`); strip it
       -- so we never build `demo..child`
       local clean = nsdot and (nsdot:gsub("%.+$", "")) or nil
-      local home = clean and ns_home() or ""
+      if not clean or tag ~= "dir" then return false end
+      local home = ns_home()
       local base = home ~= "" and (home .. "/" .. (clean:gsub("%.", "/"))) or ""
-      if base == "" or vim.fn.isdirectory(base) ~= 1 or tag ~= "dir" then return false end
+      if base == "" or vim.fn.isdirectory(base) ~= 1 then return false end
       local entry = (line:gsub("^%s+", "")):gsub("%s+$", "")
       if entry == "" then return false end
       local tindent = trig:match("^(%s*)")
@@ -386,7 +387,7 @@ end
 
 function M._select_output(around)
   local a, b, open = output_span(around)
-  if not a then return end
+  if not (a and open) then return end
   local buf = vim.api.nvim_get_current_buf()
   local visual = vim.fn.mode():match("[vV\22]")
   -- an operator takes a closed fold as a whole, so open it for the operator and
@@ -396,7 +397,7 @@ function M._select_output(around)
     if not visual then
       vim.schedule(function()
         if vim.api.nvim_buf_is_valid(buf) and fence.output_at(buf, open) == open then
-          pcall(vim.cmd, open .. "foldclose")
+          pcall(function() vim.cmd(open .. "foldclose") end)
         end
       end)
     end

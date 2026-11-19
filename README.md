@@ -409,7 +409,9 @@ markdown.
 ## Development
 
 ```sh
-make test   # headless mini.test suite; fetches mini.nvim into deps/ on first run
+make test   # headless mini.test suite, files in parallel; fetches mini.nvim into deps/ first
+make test FILES=tests/test_agent.lua   # just some files
+make lint   # lua-language-server over lua/ and plugin/ (.luarc.json); CI runs both
 ```
 
 The demo GIF is recorded with [VHS](https://github.com/charmbracelet/vhs):

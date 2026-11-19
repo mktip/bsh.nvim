@@ -141,7 +141,7 @@ function M.shell(target, cb)
     for _, f in ipairs(w) do f(list) end
   end
   local ok = pcall(vim.system, job.build_argv(target or "", SHELL_HIST),
-    { text = true, timeout = 15000, stdin = false },
+    { text = true, timeout = 15000 },
     function(r)
       local lines, seen = {}, false
       for l in (r.stdout or ""):gmatch("[^\r\n]+") do

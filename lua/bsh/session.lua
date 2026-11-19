@@ -105,7 +105,7 @@ local SPECS = {
       if target == "" then return { local_shell(), "-l", "-c", driver } end
       return job.build_argv(target, remote_command(token))
     end,
-    init = function() end,
+    init = function(_) end,
     -- The sentinel (printed by the driver) carries BOTH the exit code AND `$PWD`
     -- -- so we learn the session's cwd by reading the shell itself (never by
     -- parsing `cd`, which a dynamic path or a subshell would defeat). The pwd
@@ -124,7 +124,7 @@ local SPECS = {
       if target == "" then return { config.python, "-u", "-c", driver } end
       return job.build_argv(target, config.python .. " -u -c " .. vim.fn.shellescape(driver))
     end,
-    init = function() end,
+    init = function(_) end,
     send = function(s, code) -- length-prefixed chunk: header line + exact bytes
       vim.fn.chansend(s.job, tostring(#code) .. "\n" .. code)
     end,
@@ -150,7 +150,7 @@ local function generic_spec(lang)
     argv = function(_, target)
       return job.build_argv(target, (L.session or L.cmd) .. " 2>&1")
     end,
-    init = function() end,
+    init = function(_) end,
     send = function(s, code)
       local mark = L.print:format("__BSH_" .. s.token .. "__:0")
       s.sent = vim.split(code, "\n", { plain = true })

@@ -1,6 +1,5 @@
 # nvim / lua
 *.luac
-.luarc.json
 
 # editor / os
 *.swp
