@@ -56,9 +56,19 @@ function M.own(target)
 end
 
 -- Record `cmd` as run on `target`. Keeps the file to config.history_max
--- entries (rewritten, deduplicated, once it grows past twice that).
+-- entries (rewritten, deduplicated, once it grows past twice that). Never
+-- raises: an unwritable state dir costs you history, not the cell's run.
+local add
 function M.add(target, cmd)
   if config.history == false then return end
+  local ok, err = pcall(add, target, cmd)
+  if not ok and not M._warned then
+    M._warned = true
+    vim.notify("bsh: can't record history: " .. tostring(err), vim.log.levels.WARN)
+  end
+end
+
+function add(target, cmd)
   cmd = vim.trim(cmd or "")
   if cmd == "" or cmd:find("\n") then return end
   vim.fn.mkdir(dir(), "p")
